@@ -1,148 +1,83 @@
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TextChatService = game:GetService("TextChatService")
+local RunService = game:GetService("RunService")
 
--- ======= CONFIGURATION =======
-local REDIS_API_URL = "https://api-beta-mocha-45.vercel.app/api/getInstanceId"
-local PLACE_ID = 126884695634066  -- Ganti dengan game ID yang benar
-local CHECK_INTERVAL = 15    -- Detik antara pengecekan
-local MAX_ATTEMPTS = 3       -- Maksimal percobaan join per instance
--- =============================
+local player = Players.LocalPlayer
+local placeId = game.PlaceId
+local currentInstanceId = tostring(game.JobId)
+local apiGetUrl = "https://api-beta-mocha-45.vercel.app/api/getInstanceId"
+local apiDeleteUrl = "https://api-beta-mocha-45.vercel.app/api/deleteInstanceId"
 
--- Variabel untuk melacak instance terakhir
-local lastInstanceId = nil
-local isJoining = false
+-- Fungsi pilih http request
+local requestFunction = http_request or request or (syn and syn.request) or (fluxus and fluxus.request) or (krnl and krnl.request)
+if typeof(requestFunction) ~= "function" then
+    warn("❌ Executor tidak mendukung HTTP request.")
+    return
+end
 
--- Fungsi HTTP yang lebih baik dengan error handling
-local function makeHttpRequest()
-    local requestFunc = syn and syn.request or http_request or request
-    if not requestFunc then
-        warn("HTTP request tidak didukung di executor ini")
-        return nil
-    end
-    
-    local success, response = pcall(function()
-        return requestFunc({
-            Url = REDIS_API_URL,
-            Method = "GET",
-            Headers = {
-                ["Content-Type"] = "application/json"
-            }
-        })
+local function safeRequest(opts)
+    local success, result = pcall(function()
+        return requestFunction(opts)
     end)
-    
-    if not success then
-        warn("Gagal melakukan request:", response)
-        return nil
-    end
-    
-    return response
+    return success and result or nil
 end
 
--- Fungsi untuk mengirim pesan chat
-local function sendChatMessage(message)
-    -- Coba sistem chat baru (Roblox beta)
-    if TextChatService and TextChatService.TextChannels then
-        local channel = TextChatService.TextChannels.RBXGeneral
-        if channel then
-            pcall(function() channel:SendAsync(message) end)
-            return
-        end
+-- Fungsi cek dan ambil instance dari API
+local function getInstanceData()
+    local response = safeRequest({
+        Url = apiGetUrl,
+        Method = "GET"
+    })
+
+    if response and response.StatusCode == 200 then
+        local data = HttpService:JSONDecode(response.Body)
+        return data.instanceId, data.timestamp
     end
-    
-    -- Fallback ke sistem chat lama
-    local chatEvents = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
-    if chatEvents and chatEvents:FindFirstChild("SayMessageRequest") then
-        pcall(function()
-            chatEvents.SayMessageRequest:FireServer(message, "All")
-        end)
-    end
+    return nil, nil
 end
 
--- Fungsi untuk join instance
-local function joinInstance(instanceId)
-    local attempts = 0
-    
-    while attempts < MAX_ATTEMPTS and not isJoining do
-        attempts = attempts + 1
-        isJoining = true
-        
-        print(`Mencoba join instance {instanceId} (Percobaan {attempts}/{MAX_ATTEMPTS})`)
-        
-        local success, err = pcall(function()
-            TeleportService:TeleportToPlaceInstance(PLACE_ID, instanceId, Players.LocalPlayer)
-        end)
-        
-        isJoining = false
-        
-        if success then
-            -- Tunggu sampai benar-benar terteleport
-            local startTime = os.time()
-            while os.time() - startTime < 30 do  -- Timeout 30 detik
-                if game.JobId == instanceId then
-                    print("Berhasil join instance baru!")
-                    sendChatMessage("Hello guys!")
-                    return true
-                end
-                wait(1)
-            end
-            warn("Timeout: Gagal memverifikasi join")
-        else
-            warn("Gagal teleportasi:", err)
-        end
-        
-        if attempts < MAX_ATTEMPTS then
-            wait(5)  -- Tunggu 5 detik sebelum coba lagi
-        end
-    end
-    
-    return false
+-- Fungsi hapus instance dari database
+local function deleteInstance()
+    safeRequest({
+        Url = apiDeleteUrl,
+        Method = "DELETE",
+        Headers = { ["Content-Type"] = "application/json" }
+    })
 end
 
--- Fungsi utama loop
-local function mainLoop()
-    print("Memulai auto joiner loop...")
-    
+-- Fungsi konversi ISO waktu ke detik (Unix timestamp)
+local function isoToUnix(isoTime)
+    local success, result = pcall(function()
+        return DateTime.fromIsoDate(isoTime):ToUniversalTime().UnixTimestamp
+    end)
+    return success and result or 0
+end
+
+-- Fungsi utama
+task.spawn(function()
     while true do
-        -- Cek instance baru
-        local response = makeHttpRequest()
-        
-        if response and response.StatusCode == 200 then
-            local success, data = pcall(HttpService.JSONDecode, HttpService, response.Body)
-            
-            if success and data and data.instanceId then
-                if not lastInstanceId or data.instanceId ~= lastInstanceId then
-                    print("Menemukan instance baru:", data.instanceId)
-                    
-                    if joinInstance(data.instanceId) then
-                        lastInstanceId = data.instanceId
-                        
-                        -- Jalankan script tambahan setelah join
-                        -- Contoh: loadstring(game:HttpGet("URL_SCRIPT_LUA"))()
-                    else
-                        warn("Gagal join instance", data.instanceId)
-                    end
-                else
-                    print("Belum ada instance baru")
-                end
+        local instanceId, timestamp = getInstanceData()
+
+        if instanceId then
+            if instanceId == currentInstanceId then
+                game:GetService("ReplicatedStorage").DefaultChatSystemChatEvents.SayMessageRequest:FireServer("Hello Guys", "All")
+                break
             else
-                warn("Format response tidak valid")
+                local now = os.time()
+                local posted = isoToUnix(timestamp)
+                if now - posted >= 300 then -- 5 menit
+                    print("🧹 Menghapus instance karena sudah lebih dari 5 menit...")
+                    deleteInstance()
+                else
+                    print("🔁 Teleport ke instance:", instanceId)
+                    TeleportService:TeleportToPlaceInstance(placeId, instanceId, player)
+                end
+                break
             end
         else
-            warn("Gagal mendapatkan data instance")
+            print("⏳ Menunggu instance tersedia...")
         end
-        
-        wait(CHECK_INTERVAL)
+        task.wait(5)
     end
-end
-
--- Jalankan dengan error handling
-local success, err = pcall(mainLoop)
-if not success then
-    warn("Auto joiner error:", err)
-    warn("Mencoba restart dalam 30 detik...")
-    wait(30)
-    pcall(mainLoop)  -- Coba restart
-end
+end)
