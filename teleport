@@ -84,7 +84,7 @@ local function monitorInstances()
         
         if newInstanceId then
             if newInstanceId == currentInstanceId then
-                sendChatMessage("Hello Guys!")
+                sendChatMessage("sdadsadasdsadas!")
                 print("Already in the correct instance")
             else
                 print("Found new instance, attempting to teleport...")
