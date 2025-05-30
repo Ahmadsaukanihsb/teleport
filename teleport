@@ -5,7 +5,7 @@ local TextChatService = game:GetService("TextChatService")
 
 -- ======= CONFIGURATION =======
 local REDIS_API_URL = "https://api-beta-mocha-45.vercel.app/api"
-local PLACE_ID = 1234567890  -- Replace with your game ID
+local PLACE_ID = 126884695634066  -- Replace with your game ID
 local CHECK_INTERVAL = 15    -- Seconds between checks
 local INSTANCE_TIMEOUT = 300 -- 5 minutes in seconds
 -- =============================
