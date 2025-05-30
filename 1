@@ -1,6 +1,12 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
+-- Custom function to format numbers with commas
+local function formatNumberWithCommas(n)
+    local left,num,right = string.match(tostring(n), '^([^%d]*%d)(%d*)(.-)$')
+    return left..(num:reverse():gsub('(%d%d%d)', '%1,'):reverse())..right
+end
+
 local player = Players.LocalPlayer
 local userId = player.UserId
 local playerName = player.Name
@@ -15,7 +21,7 @@ for _, item in ipairs(backpack:GetChildren()) do
     local weight = string.format("%.2f KG", item:GetAttribute("Weight") or 0)
     local age = item:GetAttribute("Age") or 1
     local value = item:GetAttribute("Value") or 0
-    local formattedValue = string.format("%,d#", value)
+    local formattedValue = formatNumberWithCommas(value) .. "#"
     
     -- Handle special [Celestial] tag if present
     local itemName = item.Name
