@@ -33,21 +33,17 @@ for _, item in ipairs(backpack:GetChildren()) do
         itemName, weight, age, formattedValue))
 end
 
--- Urutkan berdasarkan nilai terbesar ke terkecil (perbaikan di sini)
+-- Urutkan berdasarkan nilai terbesar ke terkecil dengan error handling
 table.sort(backpackItems, function(a, b)
-    local valueA_str = string.match(a, "→ ([%d,]+)#")
-    local valueB_str = string.match(b, "→ ([%d,]+)#")
-
-    local valueA = 0
-    if valueA_str then
-        valueA = tonumber(valueA_str:gsub(",", "")) or 0
+    -- Extract numeric value from string
+    local function getValue(str)
+        local numStr = string.match(str, "→ ([%d,]+)#") or "0"
+        -- Remove commas and convert to number
+        return tonumber(numStr:gsub(",", "")) or 0
     end
-
-    local valueB = 0
-    if valueB_str then
-        valueB = tonumber(valueB_str:gsub(",", "")) or 0
-    end
-
+    
+    local valueA = getValue(a)
+    local valueB = getValue(b)
     return valueA > valueB
 end)
 
@@ -60,7 +56,7 @@ if #backpackStr > maxLength then
     backpackStr = string.sub(backpackStr, 1, maxLength - 3) .. "..."
 end
 
-local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSB8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
+local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
 
 -- Pilih fungsi request sesuai executor
 local requestFunction = nil
@@ -144,7 +140,7 @@ local response = safeRequest({
     Body = HttpService:JSONEncode(webhookPayload)
 })
 
-if response and (response.StatusCode == 204 or response.StatusCode == 200) then -- Discord webhook sukses (204 No Content atau 200 OK)
+if response and (response.StatusCode == 204 or response.StatusCode == 200) then
     print("✅ Webhook Discord berhasil dikirim!")
 else
     warn("❌ Gagal mengirim webhook:", response and response.StatusCode or "No response")
