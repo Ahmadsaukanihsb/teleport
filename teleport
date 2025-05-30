@@ -1,83 +1,129 @@
-local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
-local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local TextChatService = game:GetService("TextChatService")
 
-local player = Players.LocalPlayer
-local placeId = game.PlaceId
-local currentInstanceId = tostring(game.JobId)
-local apiGetUrl = "https://api-beta-mocha-45.vercel.app/api/getInstanceId"
-local apiDeleteUrl = "https://api-beta-mocha-45.vercel.app/api/deleteInstanceId"
+-- ======= CONFIGURATION =======
+local REDIS_API_URL = "https://api-beta-mocha-45.vercel.app/api"
+local PLACE_ID = 1234567890  -- Replace with your game ID
+local CHECK_INTERVAL = 15    -- Seconds between checks
+local INSTANCE_TIMEOUT = 300 -- 5 minutes in seconds
+-- =============================
 
--- Fungsi pilih http request
-local requestFunction = http_request or request or (syn and syn.request) or (fluxus and fluxus.request) or (krnl and krnl.request)
-if typeof(requestFunction) ~= "function" then
-    warn("❌ Executor tidak mendukung HTTP request.")
-    return
+-- Improved HTTP request function
+local function makeHttpRequest(method, endpoint, body)
+    local requestFunc = syn and syn.request or http_request or request
+    if not requestFunc then return nil end
+    
+    local url = REDIS_API_URL .. endpoint
+    local requestData = {
+        Url = url,
+        Method = method,
+        Headers = {
+            ["Content-Type"] = "application/json"
+        }
+    }
+    
+    if body then
+        requestData.Body = HttpService:JSONEncode(body)
+    end
+    
+    local success, response = pcall(requestFunc, requestData)
+    return success and response or nil
 end
 
-local function safeRequest(opts)
-    local success, result = pcall(function()
-        return requestFunction(opts)
-    end)
-    return success and result or nil
-end
-
--- Fungsi cek dan ambil instance dari API
-local function getInstanceData()
-    local response = safeRequest({
-        Url = apiGetUrl,
-        Method = "GET"
-    })
-
+-- Function to manage instance in Redis
+local function manageInstance(action, instanceId)
+    local endpoint = action == "get" and "/getInstanceId" or "/removeInstance"
+    local response = makeHttpRequest(action == "get" and "GET" or "POST", endpoint, 
+                      action == "remove" and {instanceId = instanceId} or nil)
+    
     if response and response.StatusCode == 200 then
         local data = HttpService:JSONDecode(response.Body)
-        return data.instanceId, data.timestamp
+        return data.instanceId or data.success
     end
-    return nil, nil
+    return nil
 end
 
--- Fungsi hapus instance dari database
-local function deleteInstance()
-    safeRequest({
-        Url = apiDeleteUrl,
-        Method = "DELETE",
-        Headers = { ["Content-Type"] = "application/json" }
-    })
+-- Universal chat message function
+local function sendChatMessage(message)
+    if TextChatService and TextChatService.TextChannels then
+        local channel = TextChatService.TextChannels.RBXGeneral
+        if channel then
+            pcall(function() channel:SendAsync(message) end)
+            return
+        end
+    end
+    
+    -- Fallback for older chat system
+    local chatEvents = game:GetService("ReplicatedStorage"):FindFirstChild("DefaultChatSystemChatEvents")
+    if chatEvents then
+        local sayMessage = chatEvents:FindFirstChild("SayMessageRequest")
+        if sayMessage then
+            pcall(function() sayMessage:FireServer(message, "All") end)
+        end
+    end
 end
 
--- Fungsi konversi ISO waktu ke detik (Unix timestamp)
-local function isoToUnix(isoTime)
-    local success, result = pcall(function()
-        return DateTime.fromIsoDate(isoTime):ToUniversalTime().UnixTimestamp
-    end)
-    return success and result or 0
-end
-
--- Fungsi utama
-task.spawn(function()
+-- Main monitoring function
+local function monitorInstances()
+    local lastCheckTime = os.time()
+    
     while true do
-        local instanceId, timestamp = getInstanceData()
+        -- Clean up old instances periodically
+        if os.time() - lastCheckTime > 60 then  -- Every minute
+            pcall(function()
+                makeHttpRequest("POST", "/cleanupInstances", {timeout = INSTANCE_TIMEOUT})
+            end)
+            lastCheckTime = os.time()
+        end
 
-        if instanceId then
-            if instanceId == currentInstanceId then
-                game:GetService("ReplicatedStorage").DefaultChatSystemChatEvents.SayMessageRequest:FireServer("Hello Guys", "All")
-                break
+        -- Get current instance
+        local currentInstanceId = game.JobId
+        local newInstanceId = manageInstance("get")
+        
+        if newInstanceId then
+            if newInstanceId == currentInstanceId then
+                sendChatMessage("Hello Guys!")
+                print("Already in the correct instance")
             else
-                local now = os.time()
-                local posted = isoToUnix(timestamp)
-                if now - posted >= 300 then -- 5 menit
-                    print("🧹 Menghapus instance karena sudah lebih dari 5 menit...")
-                    deleteInstance()
-                else
-                    print("🔁 Teleport ke instance:", instanceId)
-                    TeleportService:TeleportToPlaceInstance(placeId, instanceId, player)
+                print("Found new instance, attempting to teleport...")
+                local success = pcall(function()
+                    TeleportService:TeleportToPlaceInstance(PLACE_ID, newInstanceId, Players.LocalPlayer)
+                end)
+                
+                if success then
+                    -- Verify teleport success
+                    local startTime = os.time()
+                    while os.time() - startTime < 30 do
+                        if game.JobId == newInstanceId then
+                            sendChatMessage("Hello Guys!")
+                            manageInstance("remove", newInstanceId)
+                            break
+                        end
+                        task.wait(1)
+                    end
                 end
-                break
             end
         else
-            print("⏳ Menunggu instance tersedia...")
+            print("No new instances available")
         end
-        task.wait(5)
+        
+        task.wait(CHECK_INTERVAL)
     end
-end)
+end
+
+-- Start with error handling
+local function startMonitoring()
+    while true do
+        local success, err = pcall(monitorInstances)
+        if not success then
+            warn("Monitoring error:", err)
+            print("Restarting monitor in 30 seconds...")
+            task.wait(30)
+        end
+    end
+end
+
+-- Begin execution
+startMonitoring()
