@@ -4,20 +4,22 @@ local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TextChatService = game:GetService("TextChatService")
 
--- CONFIGURATION
+-- ======= CONFIGURATION =======
 local REDIS_API_URL = "https://api-beta-mocha-45.vercel.app/api/getInstanceId"
-local PLACE_ID = 126884695634066 -- CHANGE TO YOUR GAME ID
-local CHECK_INTERVAL = 10 -- Seconds between checks
-local MAX_WAIT_TIME = 300 -- Max seconds to wait (5 minutes)
+local PLACE_ID = 126884695634066  -- Ganti dengan game ID yang benar
+local CHECK_INTERVAL = 15    -- Detik antara pengecekan
+local MAX_ATTEMPTS = 3       -- Maksimal percobaan join per instance
+-- =============================
 
--- Global variable to track last joined instance
+-- Variabel untuk melacak instance terakhir
 local lastInstanceId = nil
+local isJoining = false
 
--- Enhanced HTTP request function
-local function makeRequest()
+-- Fungsi HTTP yang lebih baik dengan error handling
+local function makeHttpRequest()
     local requestFunc = syn and syn.request or http_request or request
     if not requestFunc then
-        warn("HTTP request not supported in this executor")
+        warn("HTTP request tidak didukung di executor ini")
         return nil
     end
     
@@ -31,88 +33,116 @@ local function makeRequest()
         })
     end)
     
-    return success and response or nil
+    if not success then
+        warn("Gagal melakukan request:", response)
+        return nil
+    end
+    
+    return response
 end
 
--- Function to send chat message
+-- Fungsi untuk mengirim pesan chat
 local function sendChatMessage(message)
-    if TextChatService then
-        -- New TextChatService system (Roblox beta)
+    -- Coba sistem chat baru (Roblox beta)
+    if TextChatService and TextChatService.TextChannels then
         local channel = TextChatService.TextChannels.RBXGeneral
         if channel then
-            channel:SendAsync(message)
+            pcall(function() channel:SendAsync(message) end)
+            return
         end
-    else
-        -- Legacy chat system
-        local chatEvent = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
-        if chatEvent then
-            chatEvent.SayMessageRequest:FireServer(message, "All")
-        end
+    end
+    
+    -- Fallback ke sistem chat lama
+    local chatEvents = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+    if chatEvents and chatEvents:FindFirstChild("SayMessageRequest") then
+        pcall(function()
+            chatEvents.SayMessageRequest:FireServer(message, "All")
+        end)
     end
 end
 
--- Function to execute after joining
-local function postJoinActions()
-    print("Successfully joined new instance!")
+-- Fungsi untuk join instance
+local function joinInstance(instanceId)
+    local attempts = 0
     
-    -- Send chat message
-    sendChatMessage("Hello guys!")
+    while attempts < MAX_ATTEMPTS and not isJoining do
+        attempts = attempts + 1
+        isJoining = true
+        
+        print(`Mencoba join instance {instanceId} (Percobaan {attempts}/{MAX_ATTEMPTS})`)
+        
+        local success, err = pcall(function()
+            TeleportService:TeleportToPlaceInstance(PLACE_ID, instanceId, Players.LocalPlayer)
+        end)
+        
+        isJoining = false
+        
+        if success then
+            -- Tunggu sampai benar-benar terteleport
+            local startTime = os.time()
+            while os.time() - startTime < 30 do  -- Timeout 30 detik
+                if game.JobId == instanceId then
+                    print("Berhasil join instance baru!")
+                    sendChatMessage("Hello guys!")
+                    return true
+                end
+                wait(1)
+            end
+            warn("Timeout: Gagal memverifikasi join")
+        else
+            warn("Gagal teleportasi:", err)
+        end
+        
+        if attempts < MAX_ATTEMPTS then
+            wait(5)  -- Tunggu 5 detik sebelum coba lagi
+        end
+    end
     
-    -- Add your custom code here that should run after joining
-    -- Example:
-    -- loadstring(game:HttpGet("https://your-script.com/script.lua"))()
-    
-    print("Post-join actions completed")
+    return false
 end
 
--- Main joining function
-local function joinNewInstance()
+-- Fungsi utama loop
+local function mainLoop()
+    print("Memulai auto joiner loop...")
+    
     while true do
-        print("Checking for new instances...")
+        -- Cek instance baru
+        local response = makeHttpRequest()
         
-        local response = makeRequest()
         if response and response.StatusCode == 200 then
             local success, data = pcall(HttpService.JSONDecode, HttpService, response.Body)
+            
             if success and data and data.instanceId then
                 if not lastInstanceId or data.instanceId ~= lastInstanceId then
-                    print("Found new instance:", data.instanceId)
+                    print("Menemukan instance baru:", data.instanceId)
                     
-                    local joinSuccess = pcall(function()
-                        TeleportService:TeleportToPlaceInstance(PLACE_ID, data.instanceId, Players.LocalPlayer)
-                    end)
-                    
-                    if joinSuccess then
+                    if joinInstance(data.instanceId) then
                         lastInstanceId = data.instanceId
                         
-                        -- Wait until successfully joined
-                        local startTime = os.time()
-                        while os.time() - startTime < MAX_WAIT_TIME do
-                            if game.JobId == data.instanceId then
-                                postJoinActions()
-                                return true
-                            end
-                            wait(1)
-                        end
-                        
-                        warn("Failed to verify join within timeout")
+                        -- Jalankan script tambahan setelah join
+                        -- Contoh: loadstring(game:HttpGet("URL_SCRIPT_LUA"))()
                     else
-                        warn("Failed to teleport to new instance")
+                        warn("Gagal join instance", data.instanceId)
                     end
                 else
-                    print("No new instances available yet")
+                    print("Belum ada instance baru")
                 end
             else
-                warn("Invalid response format from API")
+                warn("Format response tidak valid")
             end
         else
-            warn("Failed to fetch instance data")
+            warn("Gagal mendapatkan data instance")
         end
         
         wait(CHECK_INTERVAL)
     end
 end
 
--- Initial execution
-if not pcall(joinNewInstance) then
-    warn("Auto-joiner encountered a critical error")
+-- Jalankan dengan error handling
+local success, err = pcall(mainLoop)
+if not success then
+    warn("Auto joiner error:", err)
+    warn("Mencoba restart dalam 30 detik...")
+    wait(30)
+    pcall(mainLoop)  -- Coba restart
 end
