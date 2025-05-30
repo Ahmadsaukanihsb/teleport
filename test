@@ -1,0 +1,101 @@
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+local jobId = tostring(game.JobId)
+local placeId = game.PlaceId
+local userId = player.UserId
+local playerName = player.Name
+local gameUrl = "https://www.roblox.com/games/" .. placeId
+local timeNow = DateTime.now():ToIsoDate()
+
+local apiEndpoint = "https://api-beta-mocha-45.vercel.app/api/setInstanceId"
+local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
+
+-- Pilih fungsi request sesuai executor yang ada
+local requestFunction = nil
+
+if type(http_request) == "function" then
+    requestFunction = http_request
+elseif type(request) == "function" then
+    requestFunction = request
+elseif syn and type(syn.request) == "function" then
+    requestFunction = syn.request
+elseif fluxus and type(fluxus.request) == "function" then
+    requestFunction = fluxus.request
+elseif krnl and type(krnl.request) == "function" then
+    requestFunction = krnl.request
+end
+
+print("requestFunction type:", typeof(requestFunction))
+print("requestFunction value:", requestFunction)
+
+if typeof(requestFunction) ~= "function" then
+    warn("❌ Executor tidak mendukung HTTP request.")
+    return
+end
+
+-- Fungsi untuk request HTTP dengan error handling
+local function safeRequest(options)
+    local success, result = pcall(function()
+        return requestFunction(options)
+    end)
+    if success then
+        return result
+    else
+        warn("❌ Request error:", result)
+        return nil
+    end
+end
+
+-- Kirim ke server API
+local jsonData = HttpService:JSONEncode({ instanceId = jobId })
+local apiResponse = safeRequest({
+    Url = apiEndpoint,
+    Method = "POST",
+    Headers = {
+        ["Content-Type"] = "application/json"
+    },
+    Body = jsonData
+})
+
+if apiResponse and apiResponse.StatusCode == 200 then
+    print("✅ InstanceId berhasil dikirim ke server:", jobId)
+else
+    warn("❌ Gagal mengirim ke server:", apiResponse and apiResponse.StatusCode or "No response")
+end
+
+-- Payload webhook Discord
+local webhookPayload = {
+    ["username"] = "🛰️ Script Logger",
+    ["avatar_url"] = "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e2/OOjs_UI_icon_script-ltr.svg/2048px-OOjs_UI_icon_script-ltr.svg.png",
+    ["embeds"] = { {
+        ["title"] = "📡 Script Dijalan",
+        ["color"] = 0x00FF00, -- hijau
+        ["fields"] = {
+            { ["name"] = "👤 Player", ["value"] = string.format("`%s` (ID: `%s`)", playerName, userId), ["inline"] = true },
+            { ["name"] = "📍 Game", ["value"] = string.format("[%s](%s)", placeId, gameUrl), ["inline"] = true },
+            { ["name"] = "🧩 Job ID", ["value"] = "`" .. jobId .. "`", ["inline"] = false }
+        },
+        ["footer"] = {
+            ["text"] = "Logger - " .. os.date("%Y-%m-%d %H:%M:%S"),
+            ["icon_url"] = "https://i.imgur.com/Z4VbQXz.png"
+        },
+        ["timestamp"] = timeNow
+    } }
+}
+
+local webhookResponse = safeRequest({
+    Url = webhookUrl,
+    Method = "POST",
+    Headers = {
+        ["Content-Type"] = "application/json"
+    },
+    Body = HttpService:JSONEncode(webhookPayload)
+})
+
+if webhookResponse and webhookResponse.StatusCode == 200 then
+    print("✅ Webhook Discord berhasil dikirim!")
+else
+    warn("❌ Gagal mengirim webhook:", webhookResponse and webhookResponse.StatusCode or "No response")
+end
