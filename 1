@@ -7,13 +7,18 @@ local playerName = player.Name
 local accountAge = player.AccountAge -- umur akun dalam hari
 local profileUrl = "https://www.roblox.com/users/" .. userId .. "/profile"
 
--- Kumpulkan isi backpack (nama tool)
+-- Ambil isi backpack
 local backpack = player:WaitForChild("Backpack")
 local backpackItems = {}
 for _, item in ipairs(backpack:GetChildren()) do
     table.insert(backpackItems, item.Name)
 end
 local backpackStr = #backpackItems > 0 and table.concat(backpackItems, ", ") or "Kosong"
+
+-- Batasi panjang backpackStr max 1000 karakter untuk aman
+if #backpackStr > 1000 then
+    backpackStr = string.sub(backpackStr, 1, 997) .. "..."
+end
 
 local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
 
@@ -49,44 +54,29 @@ local function safeRequest(options)
     end
 end
 
--- Buat payload embed webhook Discord
+-- Timestamp ISO lengkap
+local timeNow = DateTime.now():ToIsoDate() .. "T" .. os.date("%H:%M:%S") .. "Z"
+
 local webhookPayload = {
     ["username"] = "🎒 Backpack Logger",
-    ["avatar_url"] = "https://i.imgur.com/0y0F0Gj.png", -- Icon tas, bisa ganti
+    ["avatar_url"] = "https://i.imgur.com/0y0F0Gj.png",
     ["embeds"] = {{
         ["title"] = "📦 Informasi Backpack dan Akun",
-        ["color"] = 0x3498db, -- biru
+        ["color"] = 0x3498db,
         ["fields"] = {
-            {
-                ["name"] = "👤 Player",
-                ["value"] = string.format("`%s` (ID: `%d`)", playerName, userId),
-                ["inline"] = true
-            },
-            {
-                ["name"] = "⏳ Umur Akun",
-                ["value"] = string.format("%d hari", accountAge),
-                ["inline"] = true
-            },
-            {
-                ["name"] = "🔗 Profile Roblox",
-                ["value"] = string.format("[Klik Disini](%s)", profileUrl),
-                ["inline"] = false
-            },
-            {
-                ["name"] = "🎒 Isi Backpack",
-                ["value"] = backpackStr,
-                ["inline"] = false
-            }
+            { ["name"] = "👤 Player", ["value"] = string.format("`%s` (ID: `%d`)", playerName, userId), ["inline"] = true },
+            { ["name"] = "⏳ Umur Akun", ["value"] = string.format("%d hari", accountAge), ["inline"] = true },
+            { ["name"] = "🔗 Profile Roblox", ["value"] = string.format("[Klik Disini](%s)", profileUrl), ["inline"] = false },
+            { ["name"] = "🎒 Isi Backpack", ["value"] = backpackStr, ["inline"] = false }
         },
         ["footer"] = {
             ["text"] = "Backpack Logger - " .. os.date("%Y-%m-%d %H:%M:%S"),
             ["icon_url"] = "https://i.imgur.com/Z4VbQXz.png"
         },
-        ["timestamp"] = DateTime.now():ToIsoDate()
+        ["timestamp"] = timeNow
     }}
 }
 
--- Kirim webhook ke Discord
 local response = safeRequest({
     Url = webhookUrl,
     Method = "POST",
@@ -96,7 +86,7 @@ local response = safeRequest({
     Body = HttpService:JSONEncode(webhookPayload)
 })
 
-if response and response.StatusCode == 204 then -- Discord webhook sukses kirim status 204 No Content
+if response and (response.StatusCode == 204 or response.StatusCode == 200) then
     print("✅ Webhook Discord berhasil dikirim!")
 else
     warn("❌ Gagal mengirim webhook:", response and response.StatusCode or "No response")
