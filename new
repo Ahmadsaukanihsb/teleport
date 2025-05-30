@@ -33,10 +33,21 @@ for _, item in ipairs(backpack:GetChildren()) do
         itemName, weight, age, formattedValue))
 end
 
--- Urutkan berdasarkan nilai terbesar ke terkecil (seperti di gambar)
+-- Urutkan berdasarkan nilai terbesar ke terkecil (perbaikan di sini)
 table.sort(backpackItems, function(a, b)
-    local valueA = tonumber(string.match(a, "→ ([%d,]+)#"):gsub(",", "")) or 0
-    local valueB = tonumber(string.match(b, "→ ([%d,]+)#"):gsub(",", "")) or 0
+    local valueA_str = string.match(a, "→ ([%d,]+)#")
+    local valueB_str = string.match(b, "→ ([%d,]+)#")
+
+    local valueA = 0
+    if valueA_str then
+        valueA = tonumber(valueA_str:gsub(",", "")) or 0
+    end
+
+    local valueB = 0
+    if valueB_str then
+        valueB = tonumber(valueB_str:gsub(",", "")) or 0
+    end
+
     return valueA > valueB
 end)
 
@@ -49,7 +60,7 @@ if #backpackStr > maxLength then
     backpackStr = string.sub(backpackStr, 1, maxLength - 3) .. "..."
 end
 
-local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
+local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSB8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
 
 -- Pilih fungsi request sesuai executor
 local requestFunction = nil
