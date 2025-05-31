@@ -10,8 +10,11 @@ local CHECK_INTERVAL = 15
 local PLAYER_DETECTION_RADIUS = 20
 local CHAT_MESSAGE = "dsadadsadas"
 local MAX_CHAT_PER_INSTANCE = 3
+local NEW_INSTANCE_CHECK_INTERVAL = 60 -- Interval untuk mengecek instance baru
 
 local chatCount = 0
+local lastInstanceCheck = 0
+local currentBestInstance = nil
 
 -- Fungsi cek player lain
 local function isPlayerNearby()
@@ -57,9 +60,44 @@ local function makeHttpRequest(method, endpoint, body)
     return success and response or nil
 end
 
+-- Fungsi untuk mendapatkan instance terbaru
+local function getNewestInstance()
+    local response = makeHttpRequest("GET", "/getInstanceId") -- Anda mungkin perlu menyesuaikan endpoint ini
+    if response and response.StatusCode == 200 then
+        local success, data = pcall(HttpService.JSONDecode, HttpService, response.Body)
+        if success and data.instanceId then
+            return data.instanceId
+        end
+    end
+    return nil
+end
+
+-- Fungsi untuk teleport ke instance baru
+local function teleportToNewInstance()
+    local newestInstance = getNewestInstance()
+    if newestInstance and newestInstance ~= game.JobId then
+        print("🚀 Instance baru ditemukan, teleporting...")
+        pcall(function()
+            TeleportService:TeleportToPlaceInstance(PLACE_ID, newestInstance, Players.LocalPlayer)
+        end)
+        return true
+    end
+    return false
+end
+
 -- Fungsi utama
 local function main()
     while task.wait(CHECK_INTERVAL) do
+        -- Cek instance baru secara berkala
+        if os.time() - lastInstanceCheck > NEW_INSTANCE_CHECK_INTERVAL then
+            if teleportToNewInstance() then
+                lastInstanceCheck = os.time()
+                continue -- Jika teleport berhasil, skip bagian bawah
+            end
+            lastInstanceCheck = os.time()
+        end
+
+        -- Logika utama tetap sama
         local response = makeHttpRequest("GET", "/getInstanceId")
         if response and response.StatusCode == 200 then
             local success, data = pcall(HttpService.JSONDecode, HttpService, response.Body)
@@ -77,6 +115,11 @@ local function main()
                         end)
                     else
                         print("💬 Batas chat tercapai untuk instance ini")
+                    -- Jika sudah mencapai batas chat, coba cari instance baru
+                    teleportToNewInstance()
+                    chatCount = 0 -- Reset chat count setelah teleport
+                    task.wait(5) -- Beri waktu untuk teleport
+                    continue
                     end
                 else
                     print("❌ Berada di instance salah, teleporting...")
