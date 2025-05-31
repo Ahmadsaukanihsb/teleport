@@ -1,68 +1,96 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TextChatService = game:GetService("TextChatService")
 
-local GIFT_COOLDOWN = 5
+-- Enhanced configuration
+local GIFT_COOLDOWN = 3
 local lastGiftCheck = 0
+local DEBUG_MODE = true
 
-local function acceptItemGifts()
-    local player = Players.LocalPlayer
-    if not player then 
-        print("LocalPlayer belum siap")
-        return false 
+local function debugPrint(...)
+    if DEBUG_MODE then
+        print("[Gift Debug]", ...)
     end
+end
 
-    if os.time() - lastGiftCheck < GIFT_COOLDOWN then
-        print("Cooldown gift belum selesai")
-        return false 
-    end
+local function acceptGiftsAutomatically()
+    if os.time() - lastGiftCheck < GIFT_COOLDOWN then return false end
     lastGiftCheck = os.time()
 
-    local giftsFolder = player:FindFirstChild("Gifts") or player:FindFirstChild("ReceivedGifts")
-    if not giftsFolder then
-        print("Folder Gifts atau ReceivedGifts tidak ditemukan pada player")
-        return false
-    end
+    -- Method 1: Advanced RemoteEvent detection with parameter analysis
+    debugPrint("Scanning for gift-related RemoteEvents...")
+    for _, remote in ipairs(ReplicatedStorage:GetDescendants()) do
+        if remote:IsA("RemoteEvent") then
+            local nameLower = string.lower(remote.Name)
+            if string.find(nameLower, "gift") or string.find(nameLower, "reward") or string.find(nameLower, "receive") then
+                debugPrint("Found potential gift RemoteEvent:", remote.Name)
+                
+                -- Try various parameter combinations including caster data
+                local testParams = {
+                    {},
+                    {"accept"},
+                    {true},
+                    {Players.LocalPlayer},
+                    {"accept_all"},
+                    {Players.LocalPlayer.UserId},
+                    {Players.LocalPlayer, "accept"},
+                    {userId = Players.LocalPlayer.UserId, action = "accept"}
+                }
 
-    print("Folder gifts ditemukan, jumlah hadiah:", #giftsFolder:GetChildren())
-
-    for _, gift in ipairs(giftsFolder:GetChildren()) do
-        if gift:IsA("Folder") or gift:IsA("ValueBase") or gift:IsA("Instance") then
-            local giftName = gift.Name
-            print("Mendapat gift:", giftName)
-
-            local remotes = {
-                ReplicatedStorage:FindFirstChild("GiftSystem"),
-                ReplicatedStorage:FindFirstChild("GiftHandler"),
-                ReplicatedStorage:FindFirstChild("AcceptGiftRemote"),
-                ReplicatedStorage:FindFirstChild("GiftAcceptRemote"),
-            }
-
-            local accepted = false
-            for _, remote in ipairs(remotes) do
-                if remote and remote:IsA("RemoteEvent") then
-                    print("Mencoba terima gift via remote:", remote.Name)
-                    local success, err = pcall(function()
-                        remote:FireServer("accept", giftName)
+                for _, params in ipairs(testParams) do
+                    pcall(function()
+                        remote:FireServer(unpack(params))
+                        debugPrint("Fired", remote.Name, "with params:", table.concat(params, ", "))
                     end)
-                    if success then
-                        print("🎁 Gift diterima:", giftName, "via", remote.Name)
-                        accepted = true
-                        break
-                    else
-                        warn("Gagal terima gift", giftName, "Error:", err)
-                    end
+                    task.wait(0.2)
                 end
-            end
-
-            if not accepted then
-                print("Gagal menerima gift:", giftName, "- remote tidak cocok atau error")
             end
         end
     end
 
-    return true
+    -- Method 2: Handle missing caster data specifically
+    debugPrint("Attempting to fix missing caster data...")
+    pcall(function()
+        local giftEvent = ReplicatedStorage:FindFirstChild("GiftEvent") or
+                         ReplicatedStorage:FindFirstChild("GiftRemote")
+        
+        if giftEvent then
+            -- Simulate caster data structure
+            local fakeCaster = {
+                UserId = Players.LocalPlayer.UserId,
+                Name = Players.LocalPlayer.Name,
+                DisplayName = Players.LocalPlayer.DisplayName
+            }
+            
+            giftEvent:FireServer({
+                caster = fakeCaster,
+                recipient = Players.LocalPlayer,
+                giftData = {type = "auto_collected"}
+            })
+            debugPrint("Sent simulated caster data")
+            return true
+        end
+    end)
+
+    -- Method 3: Direct inventory addition fallback
+    debugPrint("Attempting direct inventory addition...")
+    pcall(function()
+        local inventoryService = game:GetService("InventoryService")
+        if inventoryService then
+            inventoryService:AddItem(Players.LocalPlayer, "GiftBox")
+            debugPrint("Attempted direct inventory add")
+        end
+    end)
+
+    debugPrint("All methods attempted")
+    return false
 end
 
-while task.wait(GIFT_COOLDOWN) do
-    pcall(acceptItemGifts)
+-- Main execution with improved error handling
+while true do
+    local success, err = pcall(acceptGiftsAutomatically)
+    if not success then
+        debugPrint("Error in main loop:", err)
+    end
+    task.wait(GIFT_COOLDOWN)
 end
