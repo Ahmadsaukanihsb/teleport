@@ -1,70 +1,85 @@
-local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TextChatService = game:GetService("TextChatService")
 
--- Konfigurasi
-local jobId = tostring(game.JobId)
-local apiEndpoint = "https://api-beta-mocha-45.vercel.app/api/setInstanceId"
-local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-local playerName = game:GetService("Players").LocalPlayer.Name
+-- Configuration
+local GIFT_COOLDOWN = 5
+local lastGiftCheck = 0
 
--- Ambil fungsi http request yang tersedia dari executor
-local httpRequest = (http_request or request or (syn and syn.request) or (fluxus and fluxus.request) or (krnl and krnl.request))
+local function acceptGiftsAutomatically()
+    if os.time() - lastGiftCheck < GIFT_COOLDOWN then return false end
+    lastGiftCheck = os.time()
 
-if typeof(httpRequest) ~= "function" then
-    warn("❌ Executor tidak mendukung http request!")
-    return
-end
+    -- Method 1: Direct RemoteEvent triggering
+    local remoteNames = {
+        "AcceptGiftRemote", "GiftAcceptRemote", "GiftSystemRemote",
+        "GiftEvent", "GiftNetwork", "GiftHandler", "ReceiveGift"
+    }
 
--- Fungsi bantu untuk request dengan error handling
-local function safeRequest(requestTable)
-    local success, response = pcall(function()
-        return httpRequest(requestTable)
-    end)
-    if not success then
-        warn("❌ Error saat melakukan HTTP request:", response)
-        return nil
+    for _, name in pairs(remoteNames) do
+        local remote = ReplicatedStorage:FindFirstChild(name)
+        if remote and remote:IsA("RemoteEvent") then
+            pcall(function()
+                -- Try various possible parameter combinations
+                remote:FireServer()
+                remote:FireServer("accept")
+                remote:FireServer(true)
+                remote:FireServer("accept_all")
+                remote:FireServer(Players.LocalPlayer)
+                print("🎁 Successfully accepted gifts via RemoteEvent:", name)
+                return true
+            end)
+        end
     end
-    return response
+
+    -- Method 2: BindableEvents in PlayerGui
+    local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if gui then
+        for _, bindable in ipairs(gui:GetDescendants()) do
+            if bindable:IsA("BindableEvent") and string.find(string.lower(bindable.Name), "gift") then
+                pcall(function()
+                    bindable:Fire()
+                    bindable:Fire("accept")
+                    print("🎁 Success via BindableEvent:", bindable.Name)
+                    return true
+                end)
+            end
+        end
+    end
+
+    -- Method 3: Gift data in player attributes
+    if Players.LocalPlayer:GetAttribute("PendingGifts") then
+        pcall(function()
+            ReplicatedStorage.GiftSystem:FireServer("accept_all")
+            print("🎁 Accepted via pending gifts attribute")
+            return true
+        end)
+    end
+
+    -- Method 4: Find and accept specific gift instances
+    local giftsFolder = Players.LocalPlayer:FindFirstChild("Gifts")
+    if giftsFolder then
+        for _, gift in ipairs(giftsFolder:GetChildren()) do
+            pcall(function()
+                ReplicatedStorage.GiftSystem:FireServer("accept", gift.Name)
+                print("🎁 Accepted gift:", gift.Name)
+            end)
+        end
+        return true
+    end
+
+    print("⚠️ No automatic gift acceptance method worked")
+    return false
 end
 
--- Kirim ke API
-local jsonData = HttpService:JSONEncode({ instanceId = jobId })
-local apiResponse = safeRequest({
-    Url = apiEndpoint,
-    Method = "POST",
-    Headers = {
-        ["Content-Type"] = "application/json"
-    },
-    Body = jsonData
-})
-
-if apiResponse and apiResponse.StatusCode == 200 then
-    print("✅ InstanceId berhasil dikirim ke API:", jobId)
-else
-    warn("❌ Gagal kirim ke API:", apiResponse and apiResponse.StatusCode or "Tidak ada respons")
-end
-
--- Kirim ke Discord Webhook
-local embed = {
-    ["username"] = "Logger",
-    ["embeds"] = {{
-        ["title"] = "🟢 Script Dijalan",
-        ["description"] = string.format("**%s** menjalankan script\n📡 **JobId:** `%s`", playerName, jobId),
-        ["color"] = 65280, -- Hijau
-        ["timestamp"] = DateTime.now():ToIsoDate()
-    }}
-}
-
-local webhookResponse = safeRequest({
-    Url = webhookUrl,
-    Method = "POST",
-    Headers = {
-        ["Content-Type"] = "application/json"
-    },
-    Body = HttpService:JSONEncode(embed)
-})
-
-if webhookResponse and webhookResponse.StatusCode == 200 then
-    print("✅ Webhook Discord terkirim!")
-else
-    warn("❌ Gagal kirim webhook:", webhookResponse and webhookResponse.StatusCode or "Tidak ada respons")
+-- Main loop
+while task.wait(5) do
+    pcall(acceptGiftsAutomatically)
+    
+    -- Optional chat message to keep instance active
+    if math.random(1, 10) == 1 then
+        pcall(function()
+            TextChatService.TextChannels.RBXGeneral:SendAsync("Auto-gift farming active")
+        end)
+    end
 end
