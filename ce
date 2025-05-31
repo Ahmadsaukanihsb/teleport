@@ -1,51 +1,91 @@
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 
+-- 1. Tunggu LocalPlayer siap
 local localPlayer = Players.LocalPlayer
-local GUI_CHECK_INTERVAL = 2 -- Cek setiap 2 detik
+while not localPlayer do
+    task.wait(1)
+    localPlayer = Players.LocalPlayer
+end
 
--- Fungsi untuk mencari tombol Accept di PlayerGui
+-- 2. Fungsi untuk mencari tombol Accept
 local function findAcceptButton()
     local gui = localPlayer:WaitForChild("PlayerGui")
+    local acceptButton = gui:FindFirstChild("Accept", true) -- Cari tombol bernama "Accept"
     
-    -- Cari Frame/TextButton yang mengandung teks "Accept"
-    for _, element in ipairs(gui:GetDescendants()) do
-        if element:IsA("TextButton") and string.find(element.Text:lower(), "accept") then
-            return element
-        elseif element:IsA("Frame") then
-            -- Cek jika Frame mengandung tombol Accept
-            local acceptBtn = element:FindFirstChildOfClass("TextButton")
-            if acceptBtn and string.find(acceptBtn.Text:lower(), "accept") then
-                return acceptBtn
+    -- Jika tidak ditemukan, cari berdasarkan teks
+    if not acceptButton then
+        for _, element in ipairs(gui:GetDescendants()) do
+            if element:IsA("TextButton") and string.match(element.Text:lower(), "accept") then
+                acceptButton = element
+                break
             end
         end
     end
-    return nil
+    
+    return acceptButton
 end
 
--- Fungsi untuk mengklik tombol Accept
+-- 3. Fungsi untuk mengklik tombol dengan cara yang benar
 local function clickAcceptButton(button)
-    pcall(function()
-        -- Simulasikan klik mouse
-        button:FireEvent("MouseButton1Click")
-        
-        -- Alternatif jika FireEvent tidak bekerja
-        if button:IsA("TextButton") then
+    local success, err = pcall(function()
+        -- Cara 1: Gunakan Activated (untuk sebagian besar game)
+        if button:IsA("TextButton") or button:IsA("ImageButton") then
             button.Activated:Fire()
+            return true
         end
         
-        print("[SUCCESS] Berhasil mengklik tombol Accept!")
+        -- Cara 2: Gunasi MouseButton1Click (jika tersedia)
+        if button:FindFirstChild("MouseButton1Click") then
+            button.MouseButton1Click:Fire()
+            return true
+        end
+        
+        -- Cara 3: Jika semua gagal, coba klik via input virtual
+        local absolutePosition = button.AbsolutePosition
+        local absoluteSize = button.AbsoluteSize
+        local clickPosition = Vector2.new(
+            absolutePosition.X + absoluteSize.X/2,
+            absolutePosition.Y + absoluteSize.Y/2
+        )
+        
+        UserInputService:SendMouseButtonEvent(
+            clickPosition.X,
+            clickPosition.Y,
+            0, -- Left mouse button
+            true, -- Press
+            game
+        )
+        task.wait(0.1)
+        UserInputService:SendMouseButtonEvent(
+            clickPosition.X,
+            clickPosition.Y,
+            0, -- Left mouse button
+            false, -- Release
+            game
+        )
+        
+        return true
     end)
+    
+    if not success then
+        warn("Gagal mengklik tombol:", err)
+    end
+    return success
 end
 
--- Main loop
-while task.wait(GUI_CHECK_INTERVAL) do
+-- 4. Main loop
+while task.wait(2) do
     local acceptButton = findAcceptButton()
     
     if acceptButton then
-        print("[FOUND] Tombol Accept ditemukan:", acceptButton:GetFullName())
-        clickAcceptButton(acceptButton)
+        print("Tombol Accept ditemukan di:", acceptButton:GetFullName())
+        if clickAcceptButton(acceptButton) then
+            print("Berhasil mengklik Accept!")
+        else
+            print("Gagal mengklik, mencoba metode lain...")
+        end
     else
-        print("[INFO] Menunggu gift muncul...")
+        print("Memindai gift...")
     end
 end
