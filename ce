@@ -1,159 +1,18 @@
-local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local remote = ReplicatedStorage:FindFirstChild("AcceptPetGift")
 
--- Inisialisasi player dengan error handling
-local localPlayer
-local function initialize()
-    while not Players.LocalPlayer do
-        task.wait(1)
+if remote and remote:IsA("RemoteEvent") then
+    local originalFireServer = remote.FireServer
+
+    remote.FireServer = function(self, ...)
+        local args = {...}
+        print("🎁 AcceptPetGift dipanggil dengan argumen:")
+        for i, v in pairs(args) do
+            print(i, v)
+        end
+        -- Jalankan aslinya
+        return originalFireServer(self, unpack(args))
     end
-    localPlayer = Players.LocalPlayer
-    print("Player berhasil diinisialisasi:", localPlayer.Name)
-end
-
--- Fungsi untuk mendapatkan tombol Accept dengan 3 metode pencarian
-local function getAcceptButton()
-    -- 1. Cari berdasarkan path spesifik (dari error sebelumnya)
-    local path = {
-        "PlayerGui",
-        "FriendInvites",
-        "Insertio!Point",
-        "FriendInviteTemplate",
-        "Holder",
-        "Frame",
-        "Accept"
-    }
-    
-    local current = localPlayer
-    for _, childName in ipairs(path) do
-        current = current:FindFirstChild(childName)
-        if not current then break end
-    end
-    
-    if current then 
-        print("[Method 1] Tombol ditemukan via path spesifik")
-        return current 
-    end
-
-    -- 2. Cari berdasarkan teks "Accept"
-    local gui = localPlayer:FindFirstChildOfClass("PlayerGui")
-    if gui then
-        for _, element in ipairs(gui:GetDescendants()) do
-            if (element:IsA("TextButton") and string.find(string.lower(element.Text), "accept") then
-                print("[Method 2] Tombol ditemukan via teks")
-                return element
-            end
-        end
-    end
-
-    -- 3. Cari berdasarkan nama mengandung "accept"
-    if gui then
-        for _, element in ipairs(gui:GetDescendants()) do
-            if (element:IsA("TextButton") or element:IsA("ImageButton")) and 
-               string.find(string.lower(element.Name), "accept") then
-                print("[Method 3] Tombol ditemukan via nama")
-                return element
-            end
-        end
-    end
-
-    return nil
-end
-
--- Fungsi klik tombol dengan 4 metode berbeda
-local function clickButton(button)
-    -- 1. Coba ActiveEvent
-    local success = pcall(function()
-        if button:FindFirstChild("Activated") then
-            for _, connection in ipairs(getconnections(button.Activated)) do
-                connection:Fire()
-            end
-            return true
-        end
-    end)
-    if success then return true end
-
-    -- 2. Coba OnClick
-    success = pcall(function()
-        if button:FindFirstChild("OnClick") then
-            button.OnClick:Fire()
-            return true
-        end
-    end)
-    if success then return true end
-
-    -- 3. Coba MouseButton1Click
-    success = pcall(function()
-        if button:FindFirstChild("MouseButton1Click") then
-            button.MouseButton1Click:Fire()
-            return true
-        end
-    end)
-    if success then return true end
-
-    -- 4. Simulasi klik mouse (fallback)
-    success = pcall(function()
-        local absPos = button.AbsolutePosition
-        local absSize = button.AbsoluteSize
-        local clickPos = Vector2.new(
-            absPos.X + absSize.X/2,
-            absPos.Y + absSize.Y/2
-        )
-        
-        UserInputService:SendMouseButtonEvent(
-            clickPos.X,
-            clickPos.Y,
-            0, -- Left mouse button
-            true, -- Press down
-            game
-        )
-        task.wait(0.05)
-        UserInputService:SendMouseButtonEvent(
-            clickPos.X,
-            clickPos.Y,
-            0, -- Left mouse button
-            false, -- Release
-            game
-        )
-        return true
-    end)
-
-    return success
-end
-
--- Sistem pemindaian utama
-local function main()
-    initialize()
-    
-    local connection
-    connection = RunService.Heartbeat:Connect(function()
-        local button = getAcceptButton()
-        if button then
-            print("Tombol Accept ditemukan:", button:GetFullName())
-            if clickButton(button) then
-                print("SUCCESS: Gift berhasil diterima!")
-                connection:Disconnect()
-            else
-                print("WARNING: Gagal mengklik tombol")
-            end
-        end
-    end)
-
-    -- Auto-reconnect setiap 30 detik
-    while true do
-        task.wait(30)
-        if not connection.Connected then
-            connection = RunService.Heartbeat:Connect(function()
-                -- Isi fungsi sama seperti di atas
-            end)
-        end
-    end
-end
-
--- Jalankan script dengan error handling
-local success, err = pcall(main)
-if not success then
-    warn("ERROR CRITICAL:", err)
-    print("Coba restart script atau game")
+else
+    warn("❌ AcceptPetGift tidak ditemukan di ReplicatedStorage.")
 end
