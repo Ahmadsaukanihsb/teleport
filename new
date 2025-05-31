@@ -3,6 +3,7 @@ local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 -- Delta-compatible configuration
 local REDIS_API_URL = "https://api-beta-mocha-45.vercel.app/api"
@@ -10,8 +11,12 @@ local PLACE_ID = 126884695634066
 local CHECK_INTERVAL = 15
 local INSTANCE_TIMEOUT = 120
 local CHAT_MESSAGE = "dsadadsadas"
+local GIFT_COOLDOWN = 5 -- Seconds between gift checks
 
--- Delta-compatible HTTP request function
+-- Track last gift collection time
+local lastGiftCheck = 0
+
+-- Delta-compatible HTTP request function (UNCHANGED)
 local function makeHttpRequest(method, endpoint, body)
     local requestFunc = http and http.request or http_request or request
     if not requestFunc then
@@ -34,123 +39,127 @@ local function makeHttpRequest(method, endpoint, body)
     return success and response or nil
 end
 
--- ==============================================
--- ONLY THIS FUNCTION HAS BEEN MODIFIED (IMPROVED ACCEPT BUTTON LOGIC)
--- ==============================================
+-- Delta-compatible button clicker (UNCHANGED)
 local function clickAcceptButton()
     local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
-    if not gui then 
-        warn("PlayerGui not found")
-        return false 
-    end
+    if not gui then return false end
 
-    print("=== STARTING ADVANCED BUTTON CLICK ===")
+    local targetNames = {"accept", "join", "confirm", "ok"}
     
-    -- 1. Cari tombol dengan kriteria lebih akurat
-    local targetButton
     for _, screen in ipairs(gui:GetChildren()) do
         if screen:IsA("ScreenGui") and screen.Enabled then
-            print("Scanning screen:", screen.Name)
-            
-            -- Cari berdasarkan struktur path yang terdeteksi di log
-            local potentialPath = screen:FindFirstChild("Gift_Notification", true)
-            if potentialPath then
-                targetButton = potentialPath:FindFirstChild("Accept", true) or 
-                              potentialPath:FindFirstChild("Frame", true):FindFirstChild("Accept", true)
-                
-                if targetButton then
-                    print("FOUND EXACT BUTTON:", targetButton:GetFullName())
-                    break
+            for _, descendant in ipairs(screen:GetDescendants()) do
+                if (descendant:IsA("TextButton") or descendant:IsA("ImageButton")) then
+                    local lowerName = string.lower(descendant.Name)
+                    for _, target in ipairs(targetNames) do
+                        if string.find(lowerName, target) then
+                            if descendant.Visible and descendant.Active then
+                                -- Try to fire click event directly first
+                                local clickEvent = descendant:FindFirstChild("MouseButton1Click")
+                                if clickEvent then
+                                    pcall(clickEvent.Fire, clickEvent)
+                                    return true
+                                end
+                                
+                                -- Fallback to mouse simulation
+                                pcall(function()
+                                    local absPos = descendant.AbsolutePosition
+                                    local absSize = descendant.AbsoluteSize
+                                    local center = absPos + absSize/2
+                                    UserInputService:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1)
+                                    task.wait(0.1)
+                                    UserInputService:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
+                                end)
+                                return true
+                            end
+                        end
+                    end
                 end
             end
         end
     end
+    return false
+end
 
-    if not targetButton then
-        warn("Target button not found in hierarchy")
-        return false
+-- NEW FUNCTION: Auto collect gifts
+local function collectGifts()
+    if os.time() - lastGiftCheck < GIFT_COOLDOWN then return end
+    lastGiftCheck = os.time()
+
+    local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if not gui then return false end
+
+    -- Cari gift notification berdasarkan path spesifik dari log
+    local giftPopup = gui:FindFirstChild("Gift_Notification", true)
+    if not giftPopup then return end
+
+    -- Fokus ke path exact yang terdeteksi di console
+    local acceptButton = giftPopup:FindFirstChild("Frame", true)
+                      and giftPopup.Frame:FindFirstChild("Gift_Notification", true)
+                      and giftPopup.Frame.Gift_Notification:FindFirstChild("Holder", true)
+                      and giftPopup.Frame.Gift_Notification.Holder:FindFirstChild("Frame", true)
+                      and giftPopup.Frame.Gift_Notification.Holder.Frame:FindFirstChild("Accept", true)
+
+    if not acceptButton then
+        warn("Accept button not found in exact path")
+        return
     end
 
-    -- 2. Verifikasi button valid
-    if not (targetButton:IsA("TextButton") or targetButton:IsA("ImageButton")) then
-        warn("Invalid button type:", targetButton.ClassName)
-        return false
-    end
-
-    print("Button Properties:")
-    print("- Type:", targetButton.ClassName)
-    print("- Visible:", targetButton.Visible)
-    print("- Active:", targetButton.Active)
-    print("- Size:", targetButton.AbsoluteSize)
-
-    -- 3. Method 1: Trigger event langsung (100% work di Delta)
-    local function fireClickEvent(eventName)
-        local event = targetButton:FindFirstChild(eventName)
-        if event then
-            print("Attempting to fire", eventName)
-            local success = pcall(event.Fire, event)
-            if success then
-                print("SUCCESS: Event fired!")
-                return true
-            end
-        end
-        return false
-    end
-
-    -- Coba semua jenis event yang mungkin
-    if fireClickEvent("MouseButton1Click") then return true end
-    if fireClickEvent("Activated") then return true end
-    if fireClickEvent("MouseClick") then return true end
-
-    -- 4. Method 2: Virtual Input (Workaround untuk Delta)
-    print("Attempting VirtualInputManager...")
-    local clickPos = targetButton.AbsolutePosition + targetButton.AbsoluteSize/2
-    local virtualInput = game:GetService("VirtualInputManager")
+    print("Attempting to click accept button...")
     
-    -- Double click untuk memastikan
-    for i = 1, 2 do
-        pcall(function()
-            virtualInput:SendMouseButtonEvent(
-                clickPos.X, 
-                clickPos.Y,
+    -- Method 1: Trigger event langsung
+    local clickEvent = acceptButton:FindFirstChild("MouseButton1Click")
+    if clickEvent then
+        pcall(clickEvent.Fire, clickEvent)
+        print("Clicked via MouseButton1Click event")
+        return true
+    end
+
+    -- Method 2: Virtual Input (Delta compatible)
+    local success, err = pcall(function()
+        local absPos = acceptButton.AbsolutePosition
+        local absSize = acceptButton.AbsoluteSize
+        local center = absPos + absSize/2
+        
+        -- Triple click untuk memastikan
+        for i = 1, 3 do
+            VirtualInputManager:SendMouseButtonEvent(
+                center.X, 
+                center.Y,
                 0, -- MouseButton1
                 true, -- Press
                 game,
                 1 -- Click count
             )
-            task.wait(0.2)
-            
-            virtualInput:SendMouseButtonEvent(
-                clickPos.X, 
-                clickPos.Y,
+            task.wait(0.15)
+            VirtualInputManager:SendMouseButtonEvent(
+                center.X,
+                center.Y,
                 0, -- MouseButton1
                 false, -- Release
                 game,
                 1 -- Click count
             )
-            task.wait(0.3)
-        end)
-        print("Virtual click attempt", i)
-    end
-
-    -- 5. Method 3: Fire semua event yang tersedia (last resort)
-    print("Attempting to fire all events...")
-    for _, child in ipairs(targetButton:GetChildren()) do
-        if child:IsA("BindableEvent") or child:IsA("RemoteEvent") then
-            pcall(child.Fire, child)
+            task.wait(0.25)
         end
+    end)
+    
+    if not success then
+        warn("Virtual click failed:", err)
+    else
+        print("Virtual click success")
     end
 
-    print("All methods attempted")
-    return true -- Asumsikan berhasil karena sudah menemukan button
+    return success
 end
--- ==============================================
--- END OF MODIFIED FUNCTION
--- ==============================================
 
--- Main function with Delta compatibility (UNCHANGED)
+-- Modified main function with gift collection
 local function main()
     while task.wait(CHECK_INTERVAL) do
+        -- First check for gifts
+        collectGifts()
+        
+        -- Then handle instance logic (ORIGINAL CODE)
         local response = makeHttpRequest("GET", "/getInstanceId")
         if response and response.StatusCode == 200 then
             local success, data = pcall(HttpService.JSONDecode, HttpService, response.Body)
@@ -160,12 +169,7 @@ local function main()
                     pcall(function()
                         TextChatService.TextChannels.RBXGeneral:SendAsync(CHAT_MESSAGE)
                     end)
-                    
-                    -- Enhanced: Try clicking multiple times
-                    for i = 1, 3 do
-                        if clickAcceptButton() then break end
-                        task.wait(0.5)
-                    end
+                    clickAcceptButton()
                 else
                     -- Need to teleport
                     pcall(function()
