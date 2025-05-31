@@ -1,23 +1,40 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
 
-local possibleRemotes = {
+local possibleRemoteFunctionNames = {
     "PetService",
     "PetGiftingService",
-    "AcceptPetGift"
+    "GiftService",
+    "GiftRemoteFunction",
+    "InboxService",
+    "GiftData",
+    "GetGift",
+    "GetGifts",
+    "GetInbox"
 }
 
-for _, name in ipairs(possibleRemotes) do
+for _, name in ipairs(possibleRemoteFunctionNames) do
     local remote = ReplicatedStorage:FindFirstChild(name)
     if remote and remote:IsA("RemoteFunction") then
-        print("🧪 Mencoba InvokeServer pada:", remote.Name)
+        print("🔍 RemoteFunction ditemukan:", remote.Name)
+        
         local success, result = pcall(function()
             return remote:InvokeServer()
         end)
 
         if success then
-            print("✅ Response dari", name, ":", result)
+            print("✅ Hasil dari", remote.Name, ":")
+            if typeof(result) == "table" then
+                print(HttpService:JSONEncode(result))
+            else
+                print(result)
+            end
         else
-            warn("❌ Gagal InvokeServer pada", name, "-", result)
+            warn("❌ Gagal InvokeServer pada", remote.Name, "-", result)
         end
+    elseif remote and remote:IsA("RemoteEvent") then
+        print("ℹ️ RemoteEvent ditemukan (bukan RemoteFunction):", remote.Name)
     end
 end
+
+print("✅ Selesai mengecek semua kemungkinan RemoteFunction.")
