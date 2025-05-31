@@ -2,60 +2,59 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TextChatService = game:GetService("TextChatService")
 
--- Wait for the local player to be available
-local localPlayer
+-- Wait for LocalPlayer safely
+local localPlayer = Players.LocalPlayer
 while not localPlayer do
-    localPlayer = Players.LocalPlayer
     task.wait(1)
+    localPlayer = Players.LocalPlayer
 end
 
 local GIFT_COOLDOWN = 3
 local lastGiftCheck = 0
 
--- Safe wrapper for finding services
-local function getService(serviceName)
-    local service
-    pcall(function()
-        service = game:GetService(serviceName)
-    end)
-    return service
-end
-
--- Enhanced remote finder with validation
+--- **Finds the correct gift remote by scanning ReplicatedStorage**
 local function findGiftRemote()
-    local potentialNames = {
-        "GiftSystemRemote", "GiftEvent", "ClaimGifts", 
-        "GiftHandler", "GiftManager", "ReceiveGifts",
-        "FriendGiftEvent", "PetGiftingService"
+    -- Common RemoteEvent/RemoteFunction names for gifts
+    local possibleRemotes = {
+        "GiftSystem", "GiftEvent", "ClaimGifts", "GiftHandler",
+        "GiftManager", "ReceiveGifts", "FriendGiftEvent", "PetGiftingService",
+        "GiftCollector", "GiftNetwork", "GiftService", "GiftAcceptRemote"
     }
-    
-    for _, name in ipairs(potentialNames) do
+
+    for _, name in ipairs(possibleRemotes) do
         local remote = ReplicatedStorage:FindFirstChild(name)
-        if remote and (remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction")) then
+        if remote and (remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction") then
+            print("[Success] Found gift remote:", name)
             return remote
         end
     end
+
+    -- Fallback: Check descendant remotes (some games nest them)
+    for _, remote in ipairs(ReplicatedStorage:GetDescendants()) do
+        if (remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction")) and
+            (string.find(remote.Name:lower(), "gift") or string.find(remote.Name:lower(), "claim")) then
+            print("[Success] Found gift remote (fallback):", remote.Name)
+            return remote
+        end
+    end
+
+    warn("[Error] No valid gift remote found in ReplicatedStorage")
     return nil
 end
 
--- Improved gift claiming with better parameter handling
-local function claimGifts()
-    local remote = findGiftRemote()
-    if not remote then
-        warn("[Error] No valid gift remote found")
-        return false
-    end
-
-    local parameterFormats = {
+--- **Attempts different parameter formats to claim gifts**
+local function tryClaimGifts(remote)
+    local parameterAttempts = {
         "ClaimAll",
         "AcceptAll",
-        {Action = "ClaimAllGifts"},
-        {Action = "CollectAll", UserId = localPlayer.UserId},
-        {Cmd = "ClaimAll", Player = localPlayer}
+        "CollectAllGifts",
+        { Action = "ClaimAll" },
+        { Action = "CollectAll", UserId = localPlayer.UserId },
+        { Cmd = "AcceptGifts", Player = localPlayer }
     }
 
-    for _, params in ipairs(parameterFormats) do
-        local success, result = pcall(function()
+    for _, params in ipairs(parameterAttempts) do
+        local success, response = pcall(function()
             if remote:IsA("RemoteEvent") then
                 remote:FireServer(params)
             else
@@ -63,48 +62,44 @@ local function claimGifts()
             end
             return true
         end)
-        
+
         if success then
-            print("[Success] Gift claim attempt with params:", params)
+            print("[Success] Gift claim attempt worked with params:", params)
             return true
         else
-            warn("[Warning] Failed attempt with params:", params, "Error:", result)
+            warn("[Warning] Failed attempt with params:", params, "Error:", response)
         end
     end
-    
+
     return false
 end
 
--- Main function with proper initialization
-local function main()
-    print("Gift Collector Initializing...")
-    
-    -- Verify essential services
-    if not ReplicatedStorage or not localPlayer then
-        error("Essential services not available")
+--- **Main gift collection logic**
+local function collectAllGifts()
+    if os.time() - lastGiftCheck < GIFT_COOLDOWN then return end
+    lastGiftCheck = os.time()
+
+    print("\n[System] Scanning for gifts...")
+
+    -- 1. Find the correct remote
+    local remote = findGiftRemote()
+    if not remote then
+        warn("[Error] Could not find gift remote. Is the game using a different system?")
+        return
     end
 
-    while true do
-        local currentTime = os.time()
-        if currentTime - lastGiftCheck >= GIFT_COOLDOWN then
-            lastGiftCheck = currentTime
-            
-            local success, err = pcall(claimGifts)
-            if not success then
-                warn("[Error] During gift collection:", err)
-                -- Longer wait if error occurs
-                task.wait(GIFT_COOLDOWN * 2)
-            else
-                task.wait(GIFT_COOLDOWN)
-            end
-        else
-            task.wait(1)
-        end
+    -- 2. Try claiming gifts
+    local success = tryClaimGifts(remote)
+    if success then
+        print("[Success] Gifts claimed successfully!")
+    else
+        print("[Info] No gifts available or wrong parameters.")
     end
+
+
+--- **Main loop with error handling**
+while task.wait(GIFT_COOLDOWN) do
+    pcall(collectAllGifts)
 end
 
--- Protected execution
-local success, err = pcall(main)
-if not success then
-    warn("Fatal error in gift collector:", err)
-end
+print("Gift Auto-Collector running!")
