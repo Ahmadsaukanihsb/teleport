@@ -1,74 +1,151 @@
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
-local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui")
 
--- Fungsi tunggu dengan timeout manual
-local function waitForChildWithTimeout(parent, childName, timeout)
-    local startTime = tick()
-    while tick() - startTime < timeout do
-        local child = parent:FindFirstChild(childName)
-        if child then
-            return child
+-- ======= CONFIGURATION =======
+local API_ENDPOINT = "https://api-beta-mocha-45.vercel.app/api/setInstanceId"
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
+-- =============================
+
+local player = Players.LocalPlayer
+local currentJobId = game.JobId
+local playerName = player.Name
+
+-- Improved HTTP request with retry logic
+local function httpRequest(url, method, body, headers, retries)
+    retries = retries or 3
+    local requestFunc = syn and syn.request or http_request or request
+    if not requestFunc then return nil end
+    
+    for i = 1, retries do
+        local success, response = pcall(function()
+            return requestFunc({
+                Url = url,
+                Method = method,
+                Headers = headers or {
+                    ["Content-Type"] = "application/json"
+                },
+                Body = body
+            })
+        end)
+        
+        if success and response then
+            return response
         end
-        wait(0.1)
+        wait(1) -- Wait before retrying
     end
     return nil
 end
 
-local gui = waitForChildWithTimeout(playerGui, "GiftNotification", 15)
-
-if not gui then
-    warn("❌ GiftNotification tidak ditemukan dalam 15 detik.")
-    return
-end
-
-print("Daftar anak GiftNotification:")
-for _, child in ipairs(gui:GetChildren()) do
-    print("-", child.Name)
-end
-
-local frame = gui:FindFirstChild("Frame")
-if frame then
-    print("Daftar anak Frame:")
-    for _, child in ipairs(frame:GetChildren()) do
-        print("-", child.Name)
+local function getBackpackContents()
+    local contents = {}
+    local backpack = player:FindFirstChild("Backpack")
+    if not backpack then return "Backpack not found" end
+    
+    for _, item in ipairs(backpack:GetChildren()) do
+        table.insert(contents, item.Name)
     end
+    
+    return #contents > 0 and table.concat(contents, ", ") or "Backpack empty"
+end
 
-    local giftNotification = frame:FindFirstChild("Gift_Notification")
-    if giftNotification then
-        print("Daftar anak Gift_Notification:")
-        for _, child in ipairs(giftNotification:GetChildren()) do
-            print("-", child.Name)
-        end
-
-        local holder = giftNotification:FindFirstChild("Holder")
-        if holder then
-            print("Daftar anak Holder:")
-            for _, child in ipairs(holder:GetChildren()) do
-                print("-", child.Name)
-            end
-
-            local petTextLabel = holder:FindFirstChild("TextLabel")
-            local notifUI = holder:FindFirstChild("Notification_UI")
-            local notifTextLabel = notifUI and notifUI:FindFirstChild("TextLabel")
-
-            if petTextLabel then
-                print("Pet TextLabel Text:", petTextLabel.Text)
-            else
-                print("TextLabel pet tidak ditemukan")
-            end
-
-            if notifTextLabel then
-                print("Notification_UI TextLabel Text:", notifTextLabel.Text)
-            else
-                print("Notification_UI TextLabel tidak ditemukan")
-            end
-        else
-            print("Holder tidak ditemukan")
-        end
+local function updateInstanceInDatabase()
+    local data = {
+        instanceId = currentJobId,
+        player = {
+            userId = player.UserId,
+            name = player.Name,
+            accountAge = player.AccountAge
+        },
+        timestamp = os.time()
+    }
+    
+    local response = httpRequest(API_ENDPOINT, "POST", HttpService:JSONEncode(data))
+    
+    if response and response.StatusCode == 200 then
+        print("✅ Successfully updated instance ID in database:", currentJobId)
+        return true
     else
-        print("Gift_Notification tidak ditemukan")
+        warn("❌ Failed to update instance ID:", response and response.StatusCode or "No response")
+        return false
     end
-else
-    print("Frame tidak ditemukan")
+end
+
+local function sendServerChangeNotification()
+    local embed = {
+        username = "Server Tracker",
+        embeds = {
+            {
+                title = "🔄 Server Change Detected",
+                description = string.format("**%s** changed servers\n**New JobID:** `%s`", playerName, currentJobId),
+                color = 16776960, -- Yellow
+                timestamp = DateTime.now():ToIsoDate(),
+                fields = {
+                    {
+                        name = "👤 Player Info",
+                        value = string.format("UserID: %d", player.UserId),
+                        inline = true
+                    },
+                    {
+                        name = "📦 Backpack",
+                        value = getBackpackContents(),
+                        inline = true
+                    }
+                },
+                footer = {
+                    text = "Auto Server Tracker v3.1"
+                }
+            }
+        }
+    }
+    
+    httpRequest(WEBHOOK_URL, "POST", HttpService:JSONEncode(embed))
+end
+
+-- Main function to handle server joins/changes
+local function handleServerJoin()
+    -- Update the instance ID in database (with retry logic)
+    local attempts = 0
+    local maxAttempts = 3
+    local success = false
+    
+    while attempts < maxAttempts and not success do
+        attempts += 1
+        success = updateInstanceInDatabase()
+        if not success then
+            wait(2) -- Wait before retrying
+        end
+    end
+    
+    -- Send notification if successful
+    if success then
+        sendServerChangeNotification()
+    else
+        warn("❌ All attempts to update instance ID failed")
+    end
+end
+
+-- Server change detection system
+local function monitorServerChanges()
+    local lastJobId = currentJobId
+    
+    while true do
+        local newJobId = game.JobId
+        if newJobId ~= lastJobId then
+            print("🔄 Detected server change:", lastJobId, "→", newJobId)
+            currentJobId = newJobId
+            lastJobId = newJobId
+            handleServerJoin() -- Process the server change
+        end
+        wait(1) -- Check every second
+    end
+end
+
+-- Initial execution
+local success, err = pcall(function()
+    handleServerJoin() -- Run for initial join
+    monitorServerChanges() -- Start monitoring for changes
+end)
+
+if not success then
+    warn("❌ Critical error in server tracker:", err)
 end
