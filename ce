@@ -1,32 +1,17 @@
--- Aman: tidak hook metatable, tidak ubah method, hanya pantau event baru
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
 
--- Fungsi untuk pantau 1 RemoteEvent
-local function logRemote(remote)
-    if remote:IsA("RemoteEvent") then
-        -- Jalankan test saat FireServer dipanggil secara manual
-        local success, err = pcall(function()
-            remote.OnClientEvent:Connect(function(...)
-                print("📨 RemoteEvent dari server:", remote:GetFullName())
-                for i, v in ipairs({...}) do
-                    print(i, v)
-                end
-            end)
-        end)
-        if not success then
-            warn("❌ Gagal connect ke", remote.Name)
-        end
+local AcceptPetGift = ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("AcceptPetGift")
+local giftUI = player:WaitForChild("PlayerGui"):WaitForChild("GiftScreen"):WaitForChild("GiftList")
+
+-- Loop semua gift dan terima
+for _, gift in ipairs(giftUI:GetChildren()) do
+    if gift:IsA("Frame") and gift:FindFirstChild("PetName") and gift:FindFirstChild("Sender") then
+        local petName = gift.PetName.Text
+        local fromPlayer = gift.Sender.Text
+        print("📥 Menerima gift dari", fromPlayer, ":", petName)
+        AcceptPetGift:FireServer(petName, fromPlayer)
+        task.wait(0.5) -- beri delay agar tidak spam
     end
 end
-
--- Pantau semua RemoteEvent di ReplicatedStorage.GameEvents
-local folder = ReplicatedStorage:FindFirstChild("GameEvents")
-if folder then
-    for _, remote in ipairs(folder:GetChildren()) do
-        logRemote(remote)
-    end
-end
-
--- Pantau tambahan jika ada RemoteEvent baru muncul
-folder.ChildAdded:Connect(logRemote)
