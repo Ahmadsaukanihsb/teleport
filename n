@@ -1,8 +1,8 @@
-
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local TextChatService = game:GetService("TextChatService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 
@@ -61,134 +61,95 @@ local function makeHttpRequest(method, endpoint, body)
     return success and response or nil
 end
 
--- Fungsi klik tombol konfirmasi
-local function clickAcceptButton()
-    local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
-    if not gui then return false end
-
-    local targetNames = {"accept", "join", "confirm", "ok"}
-
-    for _, screen in ipairs(gui:GetChildren()) do
-        if screen:IsA("ScreenGui") and screen.Enabled then
-            for _, descendant in ipairs(screen:GetDescendants()) do
-                if (descendant:IsA("TextButton") or descendant:IsA("ImageButton")) then
-                    local lowerName = string.lower(descendant.Name)
-                    for _, target in ipairs(targetNames) do
-                        if string.find(lowerName, target) then
-                            if descendant.Visible and descendant.Active then
-                                local clickEvent = descendant:FindFirstChild("MouseButton1Click")
-                                if clickEvent then
-                                    pcall(clickEvent.Fire, clickEvent)
-                                    return true
-                                end
-
-                                pcall(function()
-                                    local absPos = descendant.AbsolutePosition
-                                    local absSize = descendant.AbsoluteSize
-                                    local center = absPos + absSize / 2
-                                    UserInputService:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1)
-                                    task.wait(0.1)
-                                    UserInputService:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
-                                end)
-                                return true
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return false
-end
-
--- Debug UI Gift
-local function debugGiftGui()
-    local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
-    if not gui then return end
-
-    local giftFrame = gui:FindFirstChild("Gift_Notification", true)
-    if not giftFrame then
-        print("Tidak menemukan Gift_Notification")
-        return
-    end
-
-    print("---- STRUKTUR GIFT GUI ----")
-    for _, d in ipairs(giftFrame:GetDescendants()) do
-        if d:IsA("TextButton") or d:IsA("ImageButton") then
-            print("Tombol ditemukan:", d.Name, "Text:", d.Text or "N/A", "Path:", d:GetFullName())
-        end
-    end
-end
-
--- Auto collect gift
-local function collectGifts()
-    if os.time() - lastGiftCheck < GIFT_COOLDOWN then return end
+-- Fungsi untuk menerima gift tanpa klik
+local function acceptGiftsWithoutClick()
+    if os.time() - lastGiftCheck < GIFT_COOLDOWN then return false end
     lastGiftCheck = os.time()
 
-    local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
-    if not gui then 
-        print("❌ PlayerGui tidak ditemukan")
-        return false 
-    end
+    -- Method 1: Cari RemoteEvent langsung
+    local giftRemotes = {
+        ReplicatedStorage:FindFirstChild("AcceptGiftRemote"),
+        ReplicatedStorage:FindFirstChild("GiftAcceptRemote"),
+        ReplicatedStorage:FindFirstChild("GiftSystemRemote"),
+        ReplicatedStorage:FindFirstChild("GiftEvent"),
+        ReplicatedStorage:FindFirstChild("GiftNetwork"),
+        ReplicatedStorage:FindFirstChild("GiftHandler")
+    }
 
-    -- Cari semua frame gift yang mungkin ada (untuk handle multiple gifts)
-    local giftFrames = {}
-    for _, screen in ipairs(gui:GetDescendants()) do
-        if screen:IsA("Frame") and screen.Name == "Gift_Notification" then
-            table.insert(giftFrames, screen)
+    for _, remote in ipairs(giftRemotes) do
+        if remote and remote:IsA("RemoteEvent") then
+            pcall(function()
+                -- Coba dengan berbagai parameter yang mungkin
+                remote:FireServer()
+                remote:FireServer("accept")
+                remote:FireServer(true)
+                remote:FireServer("accept_all")
+                print("🎁 Gift diterima via RemoteEvent:", remote:GetFullName())
+                return true
+            end)
         end
     end
 
-    if #giftFrames == 0 then
-        print("❌ Tidak ada gift notification yang ditemukan")
-        return false
-    end
-
-    local successCount = 0
-    
-    for _, giftFrame in ipairs(giftFrames) do
-        -- Cari tombol Accept dalam frame gift
-        local acceptButton = giftFrame:FindFirstChild("Accept", true)
-        
-        if acceptButton and acceptButton:IsA("TextButton") and acceptButton.Visible and acceptButton.Active then
-            print("✅ Tombol Accept ditemukan:", acceptButton:GetFullName())
-            
-            -- Method 1: Coba fire event klik langsung
-            local clickEvent = acceptButton:FindFirstChildOfClass("RemoteEvent") or 
-                             acceptButton:FindFirstChild("MouseButton1Click")
-            
-            if clickEvent then
+    -- Method 2: Cari BindableEvent di PlayerGui
+    local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if gui then
+        for _, bindable in ipairs(gui:GetDescendants()) do
+            if bindable:IsA("BindableEvent") and string.find(string.lower(bindable.Name), "gift") then
                 pcall(function()
-                    clickEvent:Fire()
-                    successCount = successCount + 1
-                    print("🎁 Gift diterima (via event)")
-                end)
-            else
-                -- Method 2: Gunakan virtual click sebagai fallback
-                pcall(function()
-                    local absPos = acceptButton.AbsolutePosition
-                    local absSize = acceptButton.AbsoluteSize
-                    local centerX = absPos.X + absSize.X/2
-                    local centerY = absPos.Y + absSize.Y/2
-                    
-                    VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, true, game, 1)
-                    task.wait(0.1)
-                    VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, false, game, 1)
-                    successCount = successCount + 1
-                    print("🎁 Gift diterima (via virtual click)")
+                    bindable:Fire()
+                    bindable:Fire("accept")
+                    print("🎁 Gift diterima via BindableEvent:", bindable:GetFullName())
+                    return true
                 end)
             end
-            
-            -- Tunggu sebentar antara setiap gift
-            task.wait(0.5)
-        else
-            print("❌ Tombol Accept tidak aktif atau tidak ditemukan dalam frame")
         end
     end
 
-    return successCount > 0
-end
+    -- Method 3: Cari nilai gift yang pending
+    if Players.LocalPlayer:FindFirstChild("Gifts") then
+        for _, gift in ipairs(Players.LocalPlayer.Gifts:GetChildren()) do
+            if gift:IsA("Folder") or gift:IsA("ValueBase") then
+                pcall(function()
+                    local success = pcall(function()
+                        ReplicatedStorage.GiftSystem:FireServer("accept", gift.Name)
+                    end)
+                    if not success then
+                        ReplicatedStorage.GiftHandler:FireServer("accept", gift.Name)
+                    end
+                    print("🎁 Gift diterima via GiftSystem:", gift.Name)
+                    return true
+                end)
+            end
+        end
+    end
 
+    -- Method 4: Fallback ke GUI click jika semua metode di atas gagal
+    local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if gui then
+        local acceptButtons = {}
+        for _, descendant in ipairs(gui:GetDescendants()) do
+            if (descendant:IsA("TextButton") or descendant:IsA("ImageButton")) and 
+               string.find(string.lower(descendant.Name), "accept") and 
+               descendant.Visible and descendant.Active then
+                table.insert(acceptButtons, descendant)
+            end
+        end
+
+        for _, button in ipairs(acceptButtons) do
+            pcall(function()
+                local pos = button.AbsolutePosition + button.AbsoluteSize/2
+                VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, true, game, 1)
+                task.wait(0.1)
+                VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, false, game, 1)
+                print("🎁 Gift diterima via fallback GUI click")
+                return true
+            end)
+        end
+    end
+
+    print("❌ Tidak ditemukan metode untuk menerima gift secara langsung")
+    return false
+end
 
 -- Fungsi utama
 local function main()
@@ -200,7 +161,8 @@ local function main()
                 if data.instanceId == game.JobId then
                     print("✅ Instance cocok, menjalankan tugas...")
 
-                    collectGifts()
+                    -- Menerima gift
+                    acceptGiftsWithoutClick()
 
                     if isPlayerNearby() then
                         print("👥 Player lain terdeteksi - skip chat")
@@ -208,7 +170,6 @@ local function main()
                         pcall(function()
                             TextChatService.TextChannels.RBXGeneral:SendAsync(CHAT_MESSAGE)
                         end)
-                        clickAcceptButton()
                     end
                 else
                     print("❌ Berada di instance salah, teleporting...")
