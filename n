@@ -11,8 +11,8 @@ local PLACE_ID = 126884695634066
 local CHECK_INTERVAL = 15
 local INSTANCE_TIMEOUT = 120
 local CHAT_MESSAGE = "dsadadsadas"
-local GIFT_COOLDOWN = 5 -- Seconds between gift checks
-local PLAYER_DETECTION_RADIUS = 20 -- Distance to check for other players
+local GIFT_COOLDOWN = 3 -- Seconds between gift checks
+local PLAYER_DETECTION_RADIUS = 5 -- Distance to check for other players
 
 -- Track last gift collection time
 local lastGiftCheck = 0
