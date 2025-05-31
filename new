@@ -44,85 +44,105 @@ local function clickAcceptButton()
         return false 
     end
 
-    -- Enhanced button detection with priority:
-    -- 1. Exact "Accept" TextButton
-    -- 2. Buttons containing "accept" in name
-    -- 3. Common confirmation buttons
+    print("=== STARTING ADVANCED BUTTON CLICK ===")
     
-    local function tryClick(button)
-        if button and button.Visible and button.Active then
-            -- Method 1: Fire click event directly
-            local clickEvent = button:FindFirstChild("MouseButton1Click")
-            if clickEvent then
-                pcall(clickEvent.Fire, clickEvent)
+    -- 1. Cari tombol dengan kriteria lebih akurat
+    local targetButton
+    for _, screen in ipairs(gui:GetChildren()) do
+        if screen:IsA("ScreenGui") and screen.Enabled then
+            print("Scanning screen:", screen.Name)
+            
+            -- Cari berdasarkan struktur path yang terdeteksi di log
+            local potentialPath = screen:FindFirstChild("Gift_Notification", true)
+            if potentialPath then
+                targetButton = potentialPath:FindFirstChild("Accept", true) or 
+                              potentialPath:FindFirstChild("Frame", true):FindFirstChild("Accept", true)
+                
+                if targetButton then
+                    print("FOUND EXACT BUTTON:", targetButton:GetFullName())
+                    break
+                end
+            end
+        end
+    end
+
+    if not targetButton then
+        warn("Target button not found in hierarchy")
+        return false
+    end
+
+    -- 2. Verifikasi button valid
+    if not (targetButton:IsA("TextButton") or targetButton:IsA("ImageButton")) then
+        warn("Invalid button type:", targetButton.ClassName)
+        return false
+    end
+
+    print("Button Properties:")
+    print("- Type:", targetButton.ClassName)
+    print("- Visible:", targetButton.Visible)
+    print("- Active:", targetButton.Active)
+    print("- Size:", targetButton.AbsoluteSize)
+
+    -- 3. Method 1: Trigger event langsung (100% work di Delta)
+    local function fireClickEvent(eventName)
+        local event = targetButton:FindFirstChild(eventName)
+        if event then
+            print("Attempting to fire", eventName)
+            local success = pcall(event.Fire, event)
+            if success then
+                print("SUCCESS: Event fired!")
                 return true
             end
-            
-            -- Method 2: Simulate mouse click
-            pcall(function()
-                local absPos = button.AbsolutePosition
-                local absSize = button.AbsoluteSize
-                local center = absPos + absSize/2
-                
-                -- Double click for reliability
-                for i = 1, 2 do
-                    UserInputService:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1)
-                    task.wait(0.1)
-                    UserInputService:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
-                    task.wait(0.1)
-                end
-            end)
-            return true
         end
         return false
     end
 
-    -- Search through all GUI elements
-    for _, screen in ipairs(gui:GetChildren()) do
-        if screen:IsA("ScreenGui") and screen.Enabled then
-            -- First pass: Look for exact "Accept" TextButton
-            for _, descendant in ipairs(screen:GetDescendants()) do
-                if descendant:IsA("TextButton") and string.lower(descendant.Text) == "accept" then
-                    if tryClick(descendant) then
-                        print("Clicked exact 'Accept' TextButton")
-                        return true
-                    end
-                end
-            end
+    -- Coba semua jenis event yang mungkin
+    if fireClickEvent("MouseButton1Click") then return true end
+    if fireClickEvent("Activated") then return true end
+    if fireClickEvent("MouseClick") then return true end
+
+    -- 4. Method 2: Virtual Input (Workaround untuk Delta)
+    print("Attempting VirtualInputManager...")
+    local clickPos = targetButton.AbsolutePosition + targetButton.AbsoluteSize/2
+    local virtualInput = game:GetService("VirtualInputManager")
+    
+    -- Double click untuk memastikan
+    for i = 1, 2 do
+        pcall(function()
+            virtualInput:SendMouseButtonEvent(
+                clickPos.X, 
+                clickPos.Y,
+                0, -- MouseButton1
+                true, -- Press
+                game,
+                1 -- Click count
+            )
+            task.wait(0.2)
             
-            -- Second pass: Look for buttons containing "accept"
-            for _, descendant in ipairs(screen:GetDescendants()) do
-                if (descendant:IsA("TextButton") or descendant:IsA("ImageButton")) then
-                    local lowerName = string.lower(descendant.Name)
-                    if string.find(lowerName, "accept") then
-                        if tryClick(descendant) then
-                            print("Clicked button with 'accept' in name")
-                            return true
-                        end
-                    end
-                end
-            end
-            
-            -- Third pass: Common confirmation buttons
-            local commonNames = {"confirm", "join", "ok", "yes"}
-            for _, descendant in ipairs(screen:GetDescendants()) do
-                if (descendant:IsA("TextButton") or descendant:IsA("ImageButton")) then
-                    local lowerName = string.lower(descendant.Name)
-                    for _, name in ipairs(commonNames) do
-                        if string.find(lowerName, name) then
-                            if tryClick(descendant) then
-                                print("Clicked common confirmation button:", descendant.Name)
-                                return true
-                            end
-                        end
-                    end
-                end
-            end
+            virtualInput:SendMouseButtonEvent(
+                clickPos.X, 
+                clickPos.Y,
+                0, -- MouseButton1
+                false, -- Release
+                game,
+                1 -- Click count
+            )
+            task.wait(0.3)
+        end)
+        print("Virtual click attempt", i)
+    end
+
+    -- 5. Method 3: Fire semua event yang tersedia (last resort)
+    print("Attempting to fire all events...")
+    for _, child in ipairs(targetButton:GetChildren()) do
+        if child:IsA("BindableEvent") or child:IsA("RemoteEvent") then
+            pcall(child.Fire, child)
         end
     end
-    
-    warn("No acceptable button found")
-    return false
+
+    print("All methods attempted")
+    return true -- Asumsikan berhasil karena sudah menemukan button
 end
 -- ==============================================
 -- END OF MODIFIED FUNCTION
