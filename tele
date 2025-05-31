@@ -7,8 +7,8 @@ local TextChatService = game:GetService("TextChatService")
 local REDIS_API_URL = "https://api-beta-mocha-45.vercel.app/api"
 local PLACE_ID = 126884695634066  -- Replace with your game ID
 local CHECK_INTERVAL = 15    -- Seconds between checks
-local INSTANCE_TIMEOUT = 120 -- 5 minutes in seconds
-local CHAT_MESSAGE = "Hello Guys!"  -- Message to send when in correct instance
+local INSTANCE_TIMEOUT = 120 -- 2 minutes in seconds
+local CHAT_MESSAGE = "dsadadsadas"  -- Message to send when in correct instance
 -- =============================
 
 -- Improved HTTP request function
