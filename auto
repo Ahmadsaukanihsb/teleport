@@ -10,10 +10,11 @@ local CHECK_INTERVAL = 15
 local PLAYER_DETECTION_RADIUS = 20
 local CHAT_MESSAGE = "dsadadsadas"
 local MAX_CHAT_PER_INSTANCE = 3
-
-local chatCount = 0
-local lastTeleportAttempt = 0
 local TELEPORT_COOLDOWN = 30 -- Cooldown untuk menghindari teleport spam
+
+-- Penyimpanan lokal untuk melacak instance
+local instanceChatCounts = {}
+local lastTeleportAttempt = 0
 
 -- Fungsi cek player lain
 local function isPlayerNearby()
@@ -80,26 +81,37 @@ local function main()
         if response and response.StatusCode == 200 then
             local success, data = pcall(HttpService.JSONDecode, HttpService, response.Body)
             if success and data.instanceId then
-                if data.instanceId == game.JobId then
-                    print("✅ Berada di instance terbaru, menjalankan tugas...")
+                -- Inisialisasi counter untuk instance baru
+                if not instanceChatCounts[data.instanceId] then
+                    instanceChatCounts[data.instanceId] = 0
+                    print("🆕 Instance baru terdeteksi:", data.instanceId)
+                end
 
-                    if isPlayerNearby() then
+                if data.instanceId == game.JobId then
+                    print("✅ Berada di instance", game.JobId, "| Chat terkirim:", instanceChatCounts[game.JobId], "/", MAX_CHAT_PER_INSTANCE)
+
+                    if instanceChatCounts[game.JobId] >= MAX_CHAT_PER_INSTANCE then
+                        print("🚫 Batas chat tercapai untuk instance ini")
+                        -- Cari instance baru
+                        continue
+                    elseif isPlayerNearby() then
                         print("👥 Player lain terdeteksi - skip chat")
-                    elseif chatCount < MAX_CHAT_PER_INSTANCE then
+                    else
                         pcall(function()
                             TextChatService.TextChannels.RBXGeneral:SendAsync(CHAT_MESSAGE)
-                            chatCount += 1
-                            print("💬 Chat ke-", chatCount)
+                            instanceChatCounts[game.JobId] += 1
+                            print("💬 Mengirim chat (", instanceChatCounts[game.JobId], "/", MAX_CHAT_PER_INSTANCE, ")")
                         end)
-                    else
-                        print("💬 Batas chat tercapai, meminta instance baru...")
-                        -- Reset chat count dan biarkan loop berikutnya mendapatkan instance baru
-                        chatCount = 0
                     end
                 else
                     print("🔄 Instance lebih baru tersedia, teleporting...")
+                    -- Reset counter untuk instance sebelumnya
+                    if instanceChatCounts[game.JobId] then
+                        instanceChatCounts[game.JobId] = nil
+                    end
+                    
                     if safeTeleport(data.instanceId) then
-                        chatCount = 0 -- Reset chat count setelah teleport
+                        task.wait(5) -- Beri waktu untuk teleport
                     end
                 end
             else
