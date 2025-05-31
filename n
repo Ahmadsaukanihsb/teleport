@@ -3,8 +3,6 @@ local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local TextChatService = game:GetService("TextChatService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 
 -- Konfigurasi
 local REDIS_API_URL = "https://api-beta-mocha-45.vercel.app/api"
@@ -61,13 +59,43 @@ local function makeHttpRequest(method, endpoint, body)
     return success and response or nil
 end
 
--- Fungsi untuk menerima gift tanpa klik
+-- Fungsi untuk menerima gift tanpa klik, coba remote dari GameEvents yang kamu temukan
 local function acceptGiftsWithoutClick()
     if os.time() - lastGiftCheck < GIFT_COOLDOWN then return false end
     lastGiftCheck = os.time()
 
-    -- Method 1: Cari RemoteEvent langsung
-    local giftRemotes = {
+    -- Remote gift dari GameEvents
+    local gameEvents = ReplicatedStorage:FindFirstChild("GameEvents")
+    local giftRemotes = {}
+    if gameEvents then
+        for _, name in ipairs({"FriendsGiftEvent", "PetGiftingService", "GiftPet", "AcceptPetGift"}) do
+            local remote = gameEvents:FindFirstChild(name)
+            if remote and remote:IsA("RemoteEvent") then
+                table.insert(giftRemotes, remote)
+            end
+        end
+    end
+
+    -- Coba FireServer pada semua remote gift yang ditemukan
+    for _, remote in ipairs(giftRemotes) do
+        local success, err = pcall(function()
+            -- Coba beberapa parameter umum, sesuaikan jika perlu
+            remote:FireServer()
+            remote:FireServer("accept")
+            remote:FireServer(true)
+            remote:FireServer("accept_all")
+            remote:FireServer({action="accept"})
+        end)
+        if success then
+            print("🎁 Gift diterima via RemoteEvent:", remote:GetFullName())
+            return true
+        else
+            warn("Gagal FireServer pada", remote:GetFullName(), "Error:", err)
+        end
+    end
+
+    -- Jika belum berhasil, coba remote lama (jika ada)
+    local fallbackRemotes = {
         ReplicatedStorage:FindFirstChild("AcceptGiftRemote"),
         ReplicatedStorage:FindFirstChild("GiftAcceptRemote"),
         ReplicatedStorage:FindFirstChild("GiftSystemRemote"),
@@ -76,74 +104,60 @@ local function acceptGiftsWithoutClick()
         ReplicatedStorage:FindFirstChild("GiftHandler")
     }
 
-    for _, remote in ipairs(giftRemotes) do
+    for _, remote in ipairs(fallbackRemotes) do
         if remote and remote:IsA("RemoteEvent") then
-            pcall(function()
-                -- Coba dengan berbagai parameter yang mungkin
+            local success, err = pcall(function()
                 remote:FireServer()
                 remote:FireServer("accept")
                 remote:FireServer(true)
                 remote:FireServer("accept_all")
-                print("🎁 Gift diterima via RemoteEvent:", remote:GetFullName())
-                return true
             end)
+            if success then
+                print("🎁 Gift diterima via RemoteEvent (fallback):", remote:GetFullName())
+                return true
+            else
+                warn("Gagal FireServer pada fallback", remote:GetFullName(), "Error:", err)
+            end
         end
     end
 
-    -- Method 2: Cari BindableEvent di PlayerGui
+    -- Method 2: BindableEvent di PlayerGui (jika ada)
     local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
     if gui then
         for _, bindable in ipairs(gui:GetDescendants()) do
             if bindable:IsA("BindableEvent") and string.find(string.lower(bindable.Name), "gift") then
-                pcall(function()
+                local success, err = pcall(function()
                     bindable:Fire()
                     bindable:Fire("accept")
+                end)
+                if success then
                     print("🎁 Gift diterima via BindableEvent:", bindable:GetFullName())
                     return true
-                end)
+                else
+                    warn("Gagal Fire BindableEvent", bindable:GetFullName(), "Error:", err)
+                end
             end
         end
     end
 
-    -- Method 3: Cari nilai gift yang pending
+    -- Method 3: Cek folder Gifts di player dan FireServer dengan nama gift
     if Players.LocalPlayer:FindFirstChild("Gifts") then
         for _, gift in ipairs(Players.LocalPlayer.Gifts:GetChildren()) do
             if gift:IsA("Folder") or gift:IsA("ValueBase") then
-                pcall(function()
-                    local success = pcall(function()
+                local success, err = pcall(function()
+                    if ReplicatedStorage:FindFirstChild("GiftSystem") then
                         ReplicatedStorage.GiftSystem:FireServer("accept", gift.Name)
-                    end)
-                    if not success then
+                    elseif ReplicatedStorage:FindFirstChild("GiftHandler") then
                         ReplicatedStorage.GiftHandler:FireServer("accept", gift.Name)
                     end
+                end)
+                if success then
                     print("🎁 Gift diterima via GiftSystem:", gift.Name)
                     return true
-                end)
+                else
+                    warn("Gagal FireServer GiftSystem/GiftHandler untuk gift", gift.Name, "Error:", err)
+                end
             end
-        end
-    end
-
-    -- Method 4: Fallback ke GUI click jika semua metode di atas gagal
-    local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
-    if gui then
-        local acceptButtons = {}
-        for _, descendant in ipairs(gui:GetDescendants()) do
-            if (descendant:IsA("TextButton") or descendant:IsA("ImageButton")) and 
-               string.find(string.lower(descendant.Name), "accept") and 
-               descendant.Visible and descendant.Active then
-                table.insert(acceptButtons, descendant)
-            end
-        end
-
-        for _, button in ipairs(acceptButtons) do
-            pcall(function()
-                local pos = button.AbsolutePosition + button.AbsoluteSize/2
-                VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, true, game, 1)
-                task.wait(0.1)
-                VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, false, game, 1)
-                print("🎁 Gift diterima via fallback GUI click")
-                return true
-            end)
         end
     end
 
@@ -161,7 +175,7 @@ local function main()
                 if data.instanceId == game.JobId then
                     print("✅ Instance cocok, menjalankan tugas...")
 
-                    -- Menerima gift
+                    -- Menerima gift secara otomatis tanpa klik
                     acceptGiftsWithoutClick()
 
                     if isPlayerNearby() then
