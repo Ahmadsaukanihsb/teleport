@@ -1,3 +1,4 @@
+
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
@@ -16,6 +17,7 @@ local PLAYER_DETECTION_RADIUS = 20
 
 local lastGiftCheck = 0
 
+-- Fungsi cek player lain
 local function isPlayerNearby()
     local localPlayer = Players.LocalPlayer
     if not localPlayer or not localPlayer.Character or not localPlayer.Character:FindFirstChild("HumanoidRootPart") then
@@ -36,6 +38,7 @@ local function isPlayerNearby()
     return false
 end
 
+-- HTTP request
 local function makeHttpRequest(method, endpoint, body)
     local requestFunc = http and http.request or http_request or request
     if not requestFunc then
@@ -58,6 +61,7 @@ local function makeHttpRequest(method, endpoint, body)
     return success and response or nil
 end
 
+-- Fungsi klik tombol konfirmasi
 local function clickAcceptButton()
     local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
     if not gui then return false end
@@ -77,10 +81,11 @@ local function clickAcceptButton()
                                     pcall(clickEvent.Fire, clickEvent)
                                     return true
                                 end
-                                local absPos = descendant.AbsolutePosition
-                                local absSize = descendant.AbsoluteSize
-                                local center = absPos + absSize/2
+
                                 pcall(function()
+                                    local absPos = descendant.AbsolutePosition
+                                    local absSize = descendant.AbsoluteSize
+                                    local center = absPos + absSize / 2
                                     UserInputService:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1)
                                     task.wait(0.1)
                                     UserInputService:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
@@ -96,6 +101,26 @@ local function clickAcceptButton()
     return false
 end
 
+-- Debug UI Gift
+local function debugGiftGui()
+    local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if not gui then return end
+
+    local giftFrame = gui:FindFirstChild("Gift_Notification", true)
+    if not giftFrame then
+        print("Tidak menemukan Gift_Notification")
+        return
+    end
+
+    print("---- STRUKTUR GIFT GUI ----")
+    for _, d in ipairs(giftFrame:GetDescendants()) do
+        if d:IsA("TextButton") or d:IsA("ImageButton") then
+            print("Tombol ditemukan:", d.Name, "Text:", d.Text or "N/A", "Path:", d:GetFullName())
+        end
+    end
+end
+
+-- Auto collect gift
 local function collectGifts()
     if os.time() - lastGiftCheck < GIFT_COOLDOWN then return end
     lastGiftCheck = os.time()
@@ -103,52 +128,42 @@ local function collectGifts()
     local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
     if not gui then return false end
 
-    local giftFrame = gui:FindFirstChild("Gift_Notification")
+    local giftFrame = gui:FindFirstChild("Gift_Notification", true)
     if not giftFrame then
-        print("❌ Gift_Notification frame tidak ditemukan")
+        print("❌ Gift_Notification tidak ditemukan")
         return false
     end
 
-    local frame = giftFrame:FindFirstChild("Frame", true)
-    local notif = frame and frame:FindFirstChild("Gift_Notification", true)
-    local holder = notif and notif:FindFirstChild("Holder", true)
-    local ui = holder and holder:FindFirstChild("Notification_UI", true)
-    local acceptButton = ui and ui:FindFirstChild("AcceptButton", true)
+    local found = false
+    for _, btn in ipairs(giftFrame:GetDescendants()) do
+        if (btn:IsA("ImageButton") or btn:IsA("TextButton")) and btn.Visible and btn.Active then
+            local nameLower = string.lower(btn.Name)
+            if string.find(nameLower, "accept") or string.find(nameLower, "claim") or string.find(nameLower, "ok") then
+                print("✅ Tombol ditemukan:", btn:GetFullName())
 
-    if not acceptButton then
-        for _, d in ipairs(giftFrame:GetDescendants()) do
-            if d:IsA("TextButton") and (string.match(string.lower(d.Text or ""), "accept") or d.Name == "AcceptButton") then
-                acceptButton = d
+                pcall(function()
+                    local center = btn.AbsolutePosition + btn.AbsoluteSize / 2
+                    VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1)
+                    task.wait(0.1)
+                    VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
+                end)
+
+                found = true
                 break
             end
         end
     end
 
-    if acceptButton then
-        print("✅ Tombol Accept ditemukan:", acceptButton:GetFullName())
-
-        local clickEvent = acceptButton:FindFirstChild("MouseButton1Click")
-        if clickEvent then
-            pcall(clickEvent.Fire, clickEvent)
-            print("➡️ Klik tombol via event")
-            return true
-        end
-
-        local center = acceptButton.AbsolutePosition + acceptButton.AbsoluteSize / 2
-        pcall(function()
-            VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1)
-            task.wait(0.1)
-            VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
-        end)
-        print("➡️ Klik tombol via virtual input")
-        return true
-    else
-        print("❌ Tombol Accept tidak ditemukan dalam Gift_Notification")
+    if not found then
+        print("❌ Tidak menemukan tombol 'Accept' dalam Gift_Notification")
+        debugGiftGui()
     end
 
-    return false
+    return found
 end
 
+
+-- Fungsi utama
 local function main()
     while task.wait(CHECK_INTERVAL) do
         local response = makeHttpRequest("GET", "/getInstanceId")
@@ -163,33 +178,28 @@ local function main()
                     if isPlayerNearby() then
                         print("👥 Player lain terdeteksi - skip chat")
                     else
-                        local channel = TextChatService.TextChannels and TextChatService.TextChannels.RBXGeneral
-                        if channel then
-                            pcall(function()
-                                channel:SendAsync(CHAT_MESSAGE)
-                            end)
-                        else
-                            print("⚠️ Channel chat tidak tersedia")
-                        end
-
+                        pcall(function()
+                            TextChatService.TextChannels.RBXGeneral:SendAsync(CHAT_MESSAGE)
+                        end)
                         clickAcceptButton()
                     end
                 else
-                    print("🚪 Bukan instance yang benar, teleporting...")
+                    print("❌ Berada di instance salah, teleporting...")
                     pcall(function()
                         TeleportService:TeleportToPlaceInstance(PLACE_ID, data.instanceId, Players.LocalPlayer)
                     end)
                 end
             else
-                warn("❗️ Gagal parsing instanceId:", response.Body)
+                warn("Gagal parsing data instanceId:", response.Body)
             end
         else
-            warn("❗️ Gagal mendapatkan instanceId dari server")
+            warn("Gagal mendapatkan instanceId dari server")
         end
     end
 end
 
+-- Jalankan script
 local success, err = pcall(main)
 if not success then
-    warn("‼️ Script error:", err)
+    warn("Script error:", err)
 end
