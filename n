@@ -83,55 +83,56 @@ end
 
 -- NEW FUNCTION: Auto collect gifts
 local function collectGifts()
-    -- Check cooldown
     if os.time() - lastGiftCheck < GIFT_COOLDOWN then return end
     lastGiftCheck = os.time()
 
     local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
     if not gui then return false end
 
-    -- Search for gift notification frames
+    -- Cari semua frame gift dengan pola teks "Gift from @"
     for _, screen in ipairs(gui:GetChildren()) do
         if screen:IsA("ScreenGui") and screen.Enabled then
-            local giftFrame = screen:FindFirstChild("GiftNotification", true) or
-                            screen:FindFirstChild("Gift_Notification", true) or
-                            screen:FindFirstChild("GiftPopup", true)
-            
-            if giftFrame then
-                -- Find collect button
-                local collectBtn = giftFrame:FindFirstChild("Collect", true) or
-                                 giftFrame:FindFirstChild("Accept", true) or
-                                 giftFrame:FindFirstChild("Claim", true)
-                
-                if collectBtn and collectBtn:IsA("GuiButton") then
-                    print("Found gift collect button:", collectBtn:GetFullName())
-                    
-                    -- Try all click methods
-                    local clickEvent = collectBtn:FindFirstChild("MouseButton1Click")
-                    if clickEvent then
-                        pcall(clickEvent.Fire, clickEvent)
-                        return true
+            for _, frame in ipairs(screen:GetDescendants()) do
+                if frame:IsA("TextLabel") and string.find(frame.Text, "Gift from @") then
+                    -- Cari parent frame yang mengandung tombol Accept
+                    local giftFrame = frame:FindFirstAncestorOfClass("Frame")
+                    if giftFrame then
+                        -- Cari tombol Accept secara spesifik
+                        for _, button in ipairs(giftFrame:GetDescendants()) do
+                            if button:IsA("TextButton") and string.match(string.lower(button.Text), "accept") then
+                                print("Found gift accept button:", button:GetFullName())
+                                
+                                -- Method 1: Click event langsung
+                                local clickEvent = button:FindFirstChild("MouseButton1Click")
+                                if clickEvent then
+                                    pcall(clickEvent.Fire, clickEvent)
+                                    print("Clicked via event")
+                                    return true
+                                end
+                                
+                                -- Method 2: Virtual click (Delta compatible)
+                                local absPos = button.AbsolutePosition
+                                local absSize = button.AbsoluteSize
+                                if absSize.X > 0 and absSize.Y > 0 then
+                                    local center = absPos + absSize/2
+                                    pcall(function()
+                                        VirtualInputManager:SendMouseButtonEvent(
+                                            center.X, center.Y, 0, true, game, 1)
+                                        task.wait(0.1)
+                                        VirtualInputManager:SendMouseButtonEvent(
+                                            center.X, center.Y, 0, false, game, 1)
+                                    end)
+                                    print("Clicked via virtual input")
+                                    return true
+                                end
+                            end
+                        end
                     end
-                    
-                    -- Virtual click fallback
-                    pcall(function()
-                        local absPos = collectBtn.AbsolutePosition
-                        local absSize = collectBtn.AbsoluteSize
-                        local center = absPos + absSize/2
-                        
-                        VirtualInputManager:SendMouseButtonEvent(
-                            center.X, center.Y, 0, true, game, 1
-                        )
-                        task.wait(0.1)
-                        VirtualInputManager:SendMouseButtonEvent(
-                            center.X, center.Y, 0, false, game, 1
-                        )
-                    end)
-                    return true
                 end
             end
         end
     end
+    return false
 end
 
 -- Modified main function with gift collection
