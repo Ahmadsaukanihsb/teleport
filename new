@@ -1,10 +1,8 @@
-
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local TextChatService = game:GetService("TextChatService")
-local UserInputService = game:GetService("UserInputService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- Konfigurasi
 local REDIS_API_URL = "https://api-beta-mocha-45.vercel.app/api"
@@ -66,59 +64,80 @@ local function acceptGiftsWithoutClick()
     if os.time() - lastGiftCheck < GIFT_COOLDOWN then return false end
     lastGiftCheck = os.time()
 
-    -- Method 1: Cari RemoteEvent langsung
+    -- Method 1: Cari RemoteEvent langsung dan FireServer tanpa parameter (atau dengan parameter umum)
     local giftRemotes = {
         ReplicatedStorage:FindFirstChild("AcceptGiftRemote"),
         ReplicatedStorage:FindFirstChild("GiftAcceptRemote"),
         ReplicatedStorage:FindFirstChild("GiftSystemRemote"),
-        ReplicatedStorage:FindFirstChild("GiftEvent")
+        ReplicatedStorage:FindFirstChild("GiftEvent"),
+        ReplicatedStorage:FindFirstChild("GiftNetwork"),
+        ReplicatedStorage:FindFirstChild("GiftHandler")
     }
 
     for _, remote in ipairs(giftRemotes) do
         if remote and remote:IsA("RemoteEvent") then
-            pcall(function()
-                -- Coba dengan berbagai parameter yang mungkin
+            local success, err = pcall(function()
+                -- Coba beberapa parameter umum
                 remote:FireServer()
                 remote:FireServer("accept")
                 remote:FireServer(true)
+                remote:FireServer("accept_all")
+            end)
+            if success then
                 print("🎁 Gift diterima via RemoteEvent:", remote:GetFullName())
                 return true
-            end)
+            else
+                warn("Gagal FireServer pada", remote:GetFullName(), "Error:", err)
+            end
         end
     end
 
-    -- Method 2: Cari BindableEvent di PlayerGui
+    -- Method 2: Cari BindableEvent di PlayerGui dan Fire tanpa klik
     local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
     if gui then
         for _, bindable in ipairs(gui:GetDescendants()) do
             if bindable:IsA("BindableEvent") and string.find(string.lower(bindable.Name), "gift") then
-                pcall(function()
+                local success, err = pcall(function()
                     bindable:Fire()
+                    bindable:Fire("accept")
+                end)
+                if success then
                     print("🎁 Gift diterima via BindableEvent:", bindable:GetFullName())
                     return true
-                end)
+                else
+                    warn("Gagal Fire BindableEvent", bindable:GetFullName(), "Error:", err)
+                end
             end
         end
     end
 
-    -- Method 3: Cari nilai gift yang pending
-    if game:GetService("Players").LocalPlayer:FindFirstChild("Gifts") then
+    -- Method 3: Cek folder Gifts di player dan FireServer dengan nama gift
+    if Players.LocalPlayer:FindFirstChild("Gifts") then
         for _, gift in ipairs(Players.LocalPlayer.Gifts:GetChildren()) do
             if gift:IsA("Folder") or gift:IsA("ValueBase") then
-                pcall(function()
-                    game:GetService("ReplicatedStorage").GiftSystem:FireServer("accept", gift.Name)
+                local success, err = pcall(function()
+                    if ReplicatedStorage:FindFirstChild("GiftSystem") then
+                        ReplicatedStorage.GiftSystem:FireServer("accept", gift.Name)
+                    elseif ReplicatedStorage:FindFirstChild("GiftHandler") then
+                        ReplicatedStorage.GiftHandler:FireServer("accept", gift.Name)
+                    end
+                end)
+                if success then
                     print("🎁 Gift diterima via GiftSystem:", gift.Name)
                     return true
-                end)
+                else
+                    warn("Gagal FireServer GiftSystem/GiftHandler untuk gift", gift.Name, "Error:", err)
+                end
             end
         end
     end
 
+    -- Tidak ada fallback klik mouse di sini, jadi langsung return false
     print("❌ Tidak ditemukan metode untuk menerima gift secara langsung")
     return false
 end
 
--- Fungsi utama yang dimodifikasi
+-- Fungsi utama
 local function main()
     while task.wait(CHECK_INTERVAL) do
         local response = makeHttpRequest("GET", "/getInstanceId")
@@ -128,7 +147,7 @@ local function main()
                 if data.instanceId == game.JobId then
                     print("✅ Instance cocok, menjalankan tugas...")
 
-                    -- Gunakan fungsi baru yang tidak memerlukan klik
+                    -- Menerima gift secara otomatis tanpa klik
                     acceptGiftsWithoutClick()
 
                     if isPlayerNearby() then
