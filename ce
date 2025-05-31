@@ -1,41 +1,111 @@
-local function acceptItemGifts()
-    local player = Players.LocalPlayer
-    if not player then return false end
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TextChatService = game:GetService("TextChatService")
 
-    local giftsFolder = player:FindFirstChild("Gifts") or player:FindFirstChild("ReceivedGifts")
-    if not giftsFolder then
-        print("Tidak ada folder Gifts atau ReceivedGifts")
-        return false
+-- Config
+local GIFT_COOLDOWN = 3
+local lastGiftCheck = 0
+
+local function debugPrint(...)
+    print("[Gift Auto-Accept]", ...)
+end
+
+local function acceptGiftsAutomatically()
+    if os.time() - lastGiftCheck < GIFT_COOLDOWN then return false end
+    lastGiftCheck = os.time()
+
+    -- 1. Deep scan for any gift-related RemoteEvents
+    debugPrint("Scanning for RemoteEvents...")
+    for _, remote in ipairs(ReplicatedStorage:GetDescendants()) do
+        if remote:IsA("RemoteEvent") and (string.find(string.lower(remote.Name), "gift") 
+           or string.find(string.lower(remote.Name), "reward") 
+           or string.find(string.lower(remote.Name), "receive")) then
+            pcall(function()
+                debugPrint("Found RemoteEvent:", remote.Name)
+                for _, args in ipairs({{}, {"accept"}, {true}, {Players.LocalPlayer}, {"accept_all"}}) do
+                    remote:FireServer(unpack(args))
+                    debugPrint("Fired with args:", table.concat(args, ", "))
+                    task.wait(0.1)
+                end
+                return true
+            end)
+        end
     end
 
-    for _, gift in ipairs(giftsFolder:GetChildren()) do
-        if gift:IsA("Folder") or gift:IsA("ValueBase") or gift:IsA("Instance") then
-            -- Coba FireServer ke remote gift handler dengan nama gift
-            local giftName = gift.Name
-            local giftAccepted = false
+    -- 2. Check player attributes and stats
+    debugPrint("Checking player attributes...")
+    local attrs = {"PendingGifts", "UnclaimedGifts", "GiftsToClaim"}
+    for _, attr in ipairs(attrs) do
+        if Players.LocalPlayer:GetAttribute(attr) then
+            pcall(function()
+                ReplicatedStorage.GiftHandler:FireServer("claim_all")
+                debugPrint("Claimed via attribute:", attr)
+                return true
+            end)
+        end
+    end
 
-            -- Cek beberapa remote umum yang kamu punya di ReplicatedStorage
-            local remotes = {
-                ReplicatedStorage:FindFirstChild("GiftSystem"),
-                ReplicatedStorage:FindFirstChild("GiftHandler"),
-                ReplicatedStorage:FindFirstChild("AcceptGiftRemote"),
-                ReplicatedStorage:FindFirstChild("GiftAcceptRemote"),
-            }
-
-            for _, remote in ipairs(remotes) do
-                if remote and remote:IsA("RemoteEvent") then
-                    local success, err = pcall(function()
-                        remote:FireServer("accept", giftName)
+    -- 3. Check PlayerGui for gift notifications
+    debugPrint("Checking PlayerGui...")
+    local gui = Players.LocalPlayer:WaitForChild("PlayerGui")
+    for _, screen in ipairs(gui:GetDescendants()) do
+        if screen:IsA("Frame") and (string.find(string.lower(screen.Name), "gift") 
+           or string.find(string.lower(screen.Name), "notification")) then
+            debugPrint("Found gift frame:", screen.Name)
+            
+            -- Try to find accept button programmatically
+            for _, btn in ipairs(screen:GetDescendants()) do
+                if btn:IsA("TextButton") and (string.find(string.lower(btn.Name), "accept") 
+                   or string.find(string.lower(btn.Text), "accept")) then
+                    pcall(function()
+                        local event = btn:FindFirstChildOfClass("RemoteEvent") or 
+                                     btn:FindFirstChild("MouseButton1Click")
+                        if event then
+                            event:Fire()
+                            debugPrint("Clicked via event")
+                            return true
+                        end
                     end)
-                    if success then
-                        print("🎁 Item gift diterima:", giftName, "via", remote.Name)
-                        giftAccepted = true
-                        break
-                    else
-                        warn("Gagal terima gift", giftName, "dari", remote.Name, "Error:", err)
-                    end
                 end
             end
+        end
+    end
 
-            -- Jika sudah diterima, bisa hapus/disable gift agar tidak di-accept ulang (opsional)
-            if giftAccepted then
+    -- 4. Last resort - check for proximity prompts
+    debugPrint("Checking proximity prompts...")
+    for _, prompt in ipairs(workspace:GetDescendants()) do
+        if prompt:IsA("ProximityPrompt") and string.find(string.lower(prompt.Name), "gift") then
+            pcall(function()
+                prompt:InputHoldBegin()
+                task.wait(prompt.HoldDuration)
+                prompt:InputHoldEnd()
+                debugPrint("Triggered proximity prompt")
+                return true
+            end)
+        end
+    end
+
+    debugPrint("No working method found this cycle")
+    return false
+end
+
+-- Enhanced main loop with error recovery
+while true do
+    local success, err = pcall(function()
+        while true do
+            acceptGiftsAutomatically()
+            
+            -- Random activity to prevent AFK
+            if math.random(1, 15) == 1 then
+                pcall(function()
+                    TextChatService.TextChannels.RBXGeneral:SendAsync("Auto-gift active")
+                end)
+            end
+            
+            task.wait(GIFT_COOLDOWN)
+        end
+    end)
+    
+    debugPrint("Error occurred:", err)
+    task.wait(5) -- Wait before restarting
+end
