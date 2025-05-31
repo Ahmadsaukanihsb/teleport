@@ -4,7 +4,7 @@ local HttpService = game:GetService("HttpService")
 local TextChatService = game:GetService("TextChatService")
 
 -- Konfigurasi
-local API_URL = "https://your-vercel-app.vercel.app/api/getInstanceId"
+local API_URL = "https://api-beta-mocha-45.vercel.app/api/getInstanceId"
 local PLACE_ID = 126884695634066
 local CHAT_MESSAGE = "Pesan otomatis dari script!"
 local MAX_CHAT_PER_INSTANCE = 3
