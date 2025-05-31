@@ -1,105 +1,51 @@
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TextChatService = game:GetService("TextChatService")
+local UserInputService = game:GetService("UserInputService")
 
--- Wait for LocalPlayer safely
 local localPlayer = Players.LocalPlayer
-while not localPlayer do
-    task.wait(1)
-    localPlayer = Players.LocalPlayer
-end
+local GUI_CHECK_INTERVAL = 2 -- Cek setiap 2 detik
 
-local GIFT_COOLDOWN = 3
-local lastGiftCheck = 0
-
---- **Finds the correct gift remote by scanning ReplicatedStorage**
-local function findGiftRemote()
-    -- Common RemoteEvent/RemoteFunction names for gifts
-    local possibleRemotes = {
-        "GiftSystem", "GiftEvent", "ClaimGifts", "GiftHandler",
-        "GiftManager", "ReceiveGifts", "FriendGiftEvent", "PetGiftingService",
-        "GiftCollector", "GiftNetwork", "GiftService", "GiftAcceptRemote"
-    }
-
-    for _, name in ipairs(possibleRemotes) do
-        local remote = ReplicatedStorage:FindFirstChild(name)
-        if remote and (remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction") then
-            print("[Success] Found gift remote:", name)
-            return remote
+-- Fungsi untuk mencari tombol Accept di PlayerGui
+local function findAcceptButton()
+    local gui = localPlayer:WaitForChild("PlayerGui")
+    
+    -- Cari Frame/TextButton yang mengandung teks "Accept"
+    for _, element in ipairs(gui:GetDescendants()) do
+        if element:IsA("TextButton") and string.find(element.Text:lower(), "accept") then
+            return element
+        elseif element:IsA("Frame") then
+            -- Cek jika Frame mengandung tombol Accept
+            local acceptBtn = element:FindFirstChildOfClass("TextButton")
+            if acceptBtn and string.find(acceptBtn.Text:lower(), "accept") then
+                return acceptBtn
+            end
         end
     end
-
-    -- Fallback: Check descendant remotes (some games nest them)
-    for _, remote in ipairs(ReplicatedStorage:GetDescendants()) do
-        if (remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction")) and
-            (string.find(remote.Name:lower(), "gift") or string.find(remote.Name:lower(), "claim")) then
-            print("[Success] Found gift remote (fallback):", remote.Name)
-            return remote
-        end
-    end
-
-    warn("[Error] No valid gift remote found in ReplicatedStorage")
     return nil
 end
 
---- **Attempts different parameter formats to claim gifts**
-local function tryClaimGifts(remote)
-    local parameterAttempts = {
-        "ClaimAll",
-        "AcceptAll",
-        "CollectAllGifts",
-        { Action = "ClaimAll" },
-        { Action = "CollectAll", UserId = localPlayer.UserId },
-        { Cmd = "AcceptGifts", Player = localPlayer }
-    }
-
-    for _, params in ipairs(parameterAttempts) do
-        local success, response = pcall(function()
-            if remote:IsA("RemoteEvent") then
-                remote:FireServer(params)
-            else
-                remote:InvokeServer(params)
-            end
-            return true
-        end)
-
-        if success then
-            print("[Success] Gift claim attempt worked with params:", params)
-            return true
-        else
-            warn("[Warning] Failed attempt with params:", params, "Error:", response)
+-- Fungsi untuk mengklik tombol Accept
+local function clickAcceptButton(button)
+    pcall(function()
+        -- Simulasikan klik mouse
+        button:FireEvent("MouseButton1Click")
+        
+        -- Alternatif jika FireEvent tidak bekerja
+        if button:IsA("TextButton") then
+            button.Activated:Fire()
         end
-    end
-
-    return false
+        
+        print("[SUCCESS] Berhasil mengklik tombol Accept!")
+    end)
 end
 
---- **Main gift collection logic**
-local function collectAllGifts()
-    if os.time() - lastGiftCheck < GIFT_COOLDOWN then return end
-    lastGiftCheck = os.time()
-
-    print("\n[System] Scanning for gifts...")
-
-    -- 1. Find the correct remote
-    local remote = findGiftRemote()
-    if not remote then
-        warn("[Error] Could not find gift remote. Is the game using a different system?")
-        return
-    end
-
-    -- 2. Try claiming gifts
-    local success = tryClaimGifts(remote)
-    if success then
-        print("[Success] Gifts claimed successfully!")
+-- Main loop
+while task.wait(GUI_CHECK_INTERVAL) do
+    local acceptButton = findAcceptButton()
+    
+    if acceptButton then
+        print("[FOUND] Tombol Accept ditemukan:", acceptButton:GetFullName())
+        clickAcceptButton(acceptButton)
     else
-        print("[Info] No gifts available or wrong parameters.")
+        print("[INFO] Menunggu gift muncul...")
     end
-
-
---- **Main loop with error handling**
-while task.wait(GIFT_COOLDOWN) do
-    pcall(collectAllGifts)
 end
-
-print("Gift Auto-Collector running!")
