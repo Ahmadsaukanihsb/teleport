@@ -53,6 +53,9 @@ local function executeExternalScript()
     local success, err = pcall(function()
         loadstring(game:HttpGet(EXTERNAL_SCRIPT, true))()
     end)
+    if not success then
+        warn("⚠️ Gagal mengeksekusi external script:", err)
+    end
     return success
 end
 
@@ -70,10 +73,10 @@ local function updateInstanceInDatabase()
     local response = httpRequest(API_ENDPOINT, "POST", HttpService:JSONEncode(data))
     
     if response and response.StatusCode == 200 then
-        print("✅ Successfully updated instance ID in database:", currentJobId)
+        print("✅ Berhasil memperbarui instance ID di database:", currentJobId)
         return true
     else
-        warn("❌ Failed to update instance ID:", response and response.StatusCode or "No response")
+        warn("❌ Gagal memperbarui instance ID:", response and response.StatusCode or "Tidak ada respon")
         return false
     end
 end
@@ -83,24 +86,29 @@ local function sendServerChangeNotification()
         username = "Server Tracker",
         embeds = {
             {
-                title = "🔄 Server Change Detected",
-                description = string.format("**%s** changed servers\n**New JobID:** `%s`", playerName, currentJobId),
+                title = "🔄 Perubahan Server Terdeteksi",
+                description = string.format("**%s** berpindah server\n**JobID Baru:** `%s`", playerName, currentJobId),
                 color = 16776960, -- Yellow
                 timestamp = DateTime.now():ToIsoDate(),
                 fields = {
                     {
-                        name = "👤 Player Info",
+                        name = "👤 Info Pemain",
                         value = string.format("UserID: %d", player.UserId),
                         inline = true
                     },
                     {
-                        name = "📦 Backpack",
+                        name = "📦 Isi Backpack",
                         value = getBackpackContents(),
                         inline = true
+                    },
+                    {
+                        name = "🔄 Status Script Eksternal",
+                        value = executeExternalScript() and "Berhasil dijalankan" or "Gagal dijalankan",
+                        inline = false
                     }
                 },
                 footer = {
-                    text = "Auto Server Tracker v3.0"
+                    text = "Auto Server Tracker v3.2"
                 }
             }
         }
@@ -109,14 +117,12 @@ local function sendServerChangeNotification()
     httpRequest(WEBHOOK_URL, "POST", HttpService:JSONEncode(embed))
 end
 
--- Main function to handle server joins/changes
+-- Fungsi utama untuk menangani perubahan server
 local function handleServerJoin()
-    -- 1. First execute the external script
-    if not executeExternalScript() then
-        warn("⚠️ External script failed to execute")
-    end
+    -- 1. Jalankan script eksternal secara asynchronous
+    spawn(executeExternalScript)
     
-    -- 2. Update the instance ID in database (with retry logic)
+    -- 2. Update instance ID di database (dengan retry)
     local attempts = 0
     local maxAttempts = 3
     local success = false
@@ -125,40 +131,36 @@ local function handleServerJoin()
         attempts += 1
         success = updateInstanceInDatabase()
         if not success then
-            wait(2) -- Wait before retrying
+            wait(2) -- Tunggu sebelum retry
         end
     end
     
-    -- 3. Send notification if successful
-    if success then
-        sendServerChangeNotification()
-    else
-        warn("❌ All attempts to update instance ID failed")
-    end
+    -- 3. Kirim notifikasi
+    sendServerChangeNotification()
 end
 
--- Server change detection system
+-- Sistem deteksi perubahan server
 local function monitorServerChanges()
     local lastJobId = currentJobId
     
     while true do
         local newJobId = game.JobId
         if newJobId ~= lastJobId then
-            print("🔄 Detected server change:", lastJobId, "→", newJobId)
+            print("🔄 Mendeteksi perubahan server:", lastJobId, "→", newJobId)
             currentJobId = newJobId
             lastJobId = newJobId
-            handleServerJoin() -- Process the server change
+            handleServerJoin() -- Proses perubahan server
         end
-        wait(1) -- Check every second
+        wait(1) -- Cek setiap detik
     end
 end
 
--- Initial execution
+-- Eksekusi awal
 local success, err = pcall(function()
-    handleServerJoin() -- Run for initial join
-    monitorServerChanges() -- Start monitoring for changes
+    handleServerJoin() -- Jalankan untuk join awal
+    monitorServerChanges() -- Mulai monitoring
 end)
 
 if not success then
-    warn("❌ Critical error in server tracker:", err)
+    warn("❌ Error kritis dalam server tracker:", err)
 end
