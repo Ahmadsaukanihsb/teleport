@@ -1,29 +1,110 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TextChatService = game:GetService("TextChatService")
 
-print("✅ Script dimulai") -- Harus muncul di output!
+-- Wait for the local player to be available
+local localPlayer
+while not localPlayer do
+    localPlayer = Players.LocalPlayer
+    task.wait(1)
+end
 
-local function acceptGiftTest()
-    print("🔄 Mencoba menerima gift...")
+local GIFT_COOLDOWN = 3
+local lastGiftCheck = 0
 
-    local player = Players.LocalPlayer
-    if not player then
-        print("❌ LocalPlayer tidak ditemukan")
-        return
+-- Safe wrapper for finding services
+local function getService(serviceName)
+    local service
+    pcall(function()
+        service = game:GetService(serviceName)
+    end)
+    return service
+end
+
+-- Enhanced remote finder with validation
+local function findGiftRemote()
+    local potentialNames = {
+        "GiftSystemRemote", "GiftEvent", "ClaimGifts", 
+        "GiftHandler", "GiftManager", "ReceiveGifts",
+        "FriendGiftEvent", "PetGiftingService"
+    }
+    
+    for _, name in ipairs(potentialNames) do
+        local remote = ReplicatedStorage:FindFirstChild(name)
+        if remote and (remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction")) then
+            return remote
+        end
+    end
+    return nil
+end
+
+-- Improved gift claiming with better parameter handling
+local function claimGifts()
+    local remote = findGiftRemote()
+    if not remote then
+        warn("[Error] No valid gift remote found")
+        return false
     end
 
-    local giftsFolder = player:FindFirstChild("Gifts") or player:FindFirstChild("ReceivedGifts")
-    if not giftsFolder then
-        print("📭 Tidak ada folder Gifts/ReceivedGifts")
-        return
+    local parameterFormats = {
+        "ClaimAll",
+        "AcceptAll",
+        {Action = "ClaimAllGifts"},
+        {Action = "CollectAll", UserId = localPlayer.UserId},
+        {Cmd = "ClaimAll", Player = localPlayer}
+    }
+
+    for _, params in ipairs(parameterFormats) do
+        local success, result = pcall(function()
+            if remote:IsA("RemoteEvent") then
+                remote:FireServer(params)
+            else
+                remote:InvokeServer(params)
+            end
+            return true
+        end)
+        
+        if success then
+            print("[Success] Gift claim attempt with params:", params)
+            return true
+        else
+            warn("[Warning] Failed attempt with params:", params, "Error:", result)
+        end
+    end
+    
+    return false
+end
+
+-- Main function with proper initialization
+local function main()
+    print("Gift Collector Initializing...")
+    
+    -- Verify essential services
+    if not ReplicatedStorage or not localPlayer then
+        error("Essential services not available")
     end
 
-    print("🎁 Ditemukan folder gift dengan", #giftsFolder:GetChildren(), "item")
-
-    for _, gift in ipairs(giftsFolder:GetChildren()) do
-        print("🧾 Gift:", gift.Name)
+    while true do
+        local currentTime = os.time()
+        if currentTime - lastGiftCheck >= GIFT_COOLDOWN then
+            lastGiftCheck = currentTime
+            
+            local success, err = pcall(claimGifts)
+            if not success then
+                warn("[Error] During gift collection:", err)
+                -- Longer wait if error occurs
+                task.wait(GIFT_COOLDOWN * 2)
+            else
+                task.wait(GIFT_COOLDOWN)
+            end
+        else
+            task.wait(1)
+        end
     end
 end
 
-task.wait(3) -- Tunggu world siap
-acceptGiftTest()
+-- Protected execution
+local success, err = pcall(main)
+if not success then
+    warn("Fatal error in gift collector:", err)
+end
