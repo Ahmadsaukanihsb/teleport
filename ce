@@ -1,0 +1,59 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local lastGiftCheck = 0
+local GIFT_COOLDOWN = 5
+
+local function acceptPetGifts()
+    if os.time() - lastGiftCheck < GIFT_COOLDOWN then return false end
+    lastGiftCheck = os.time()
+
+    local player = Players.LocalPlayer
+    local gameEvents = ReplicatedStorage:FindFirstChild("GameEvents")
+    if not gameEvents then
+        warn("GameEvents tidak ditemukan di ReplicatedStorage")
+        return false
+    end
+
+    local acceptPetGiftRemote = gameEvents:FindFirstChild("AcceptPetGift")
+    if not acceptPetGiftRemote or not acceptPetGiftRemote:IsA("RemoteEvent") then
+        warn("RemoteEvent AcceptPetGift tidak ditemukan")
+        return false
+    end
+
+    -- Cari folder gift di player, contoh: "PetGifts" atau "Gifts"
+    local giftFolder = player:FindFirstChild("PetGifts") or player:FindFirstChild("Gifts")
+    if not giftFolder then
+        warn("Folder gift tidak ditemukan di player")
+        return false
+    end
+
+    -- Print debug isi gift untuk cek struktur
+    print("=== Daftar Gift yang ditemukan ===")
+    for _, gift in ipairs(giftFolder:GetChildren()) do
+        print("Gift Name:", gift.Name, "Class:", gift.ClassName)
+        -- Jika objek punya properti lain, print juga (misal ID, petType, dsb)
+        for _, prop in ipairs(gift:GetChildren()) do
+            print("  Properti:", prop.Name, "Value:", tostring(prop.Value))
+        end
+    end
+
+    -- Coba terima setiap gift dengan parameter yang biasanya berupa gift.Name
+    for _, gift in ipairs(giftFolder:GetChildren()) do
+        local success, err = pcall(function()
+            -- Coba FireServer dengan nama gift
+            acceptPetGiftRemote:FireServer(gift.Name)
+        end)
+
+        if success then
+            print("Berhasil menerima pet gift:", gift.Name)
+        else
+            warn("Gagal menerima pet gift:", gift.Name, "Error:", err)
+        end
+    end
+
+    return true
+end
+
+-- Contoh panggil fungsi ini untuk testing di Delta
+acceptPetGifts()
