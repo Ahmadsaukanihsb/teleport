@@ -1,189 +1,32 @@
-local Players = game:GetService("Players")
-local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
-local TextChatService = game:GetService("TextChatService")
-local UserInputService = game:GetService("UserInputService")
+local targetFunc = nil
 
--- Delta-compatible configuration
-local REDIS_API_URL = "https://api-beta-mocha-45.vercel.app/api"
-local PLACE_ID = 126884695634066
-local CHECK_INTERVAL = 15
-local INSTANCE_TIMEOUT = 120
-local CHAT_MESSAGE = "dsadadsadas"
-
--- Delta-compatible HTTP request function
-local function makeHttpRequest(method, endpoint, body)
-    local requestFunc = http and http.request or http_request or request
-    if not requestFunc then
-        warn("HTTP function not available in Delta")
-        return nil
+-- Temukan ulang fungsi tersebut
+for _, f in pairs(getgc(true)) do
+    if typeof(f) == "function" and islclosure(f) then
+        local constants = debug.getconstants(f)
+        for _, c in pairs(constants) do
+            if tostring(c):lower():find("acceptpetgift") then
+                targetFunc = f
+                break
+            end
+        end
     end
-
-    local url = REDIS_API_URL .. endpoint
-    local success, response = pcall(function()
-        return requestFunc({
-            Url = url,
-            Method = method,
-            Headers = {
-                ["Content-Type"] = "application/json"
-            },
-            Body = body and HttpService:JSONEncode(body) or nil
-        })
-    end)
-
-    return success and response or nil
+    if targetFunc then break end
 end
 
--- ==============================================
--- ONLY THIS FUNCTION HAS BEEN MODIFIED (IMPROVED ACCEPT BUTTON LOGIC)
--- ==============================================
-local function clickAcceptButton()
-    local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
-    if not gui then 
-        warn("PlayerGui not found")
-        return false 
+if targetFunc then
+    print("✅ Function ditemukan: ", targetFunc)
+
+    print("🔍 Constants:")
+    for i, v in ipairs(debug.getconstants(targetFunc)) do
+        print(i, v)
     end
 
-    -- Enhanced debug prints
-    print("Starting button search in PlayerGui...")
-    
-    local function tryClick(button)
-        if not (button and button.Visible and button.Active) then
-            print("Button not visible/active:", button and button:GetFullName() or "nil")
-            return false
-        end
-
-        print("Attempting to click:", button:GetFullName())
-        print("Button properties:",
-            "Visible:", button.Visible,
-            "Active:", button.Active,
-            "AbsoluteSize:", button.AbsoluteSize)
-
-        -- Method 1: Direct event triggering (prioritas utama)
-        local clickEvent = button:FindFirstChild("MouseButton1Click")
-        if clickEvent then
-            print("Found MouseButton1Click event, firing...")
-            pcall(clickEvent.Fire, clickEvent)
-            return true
-        end
-
-        -- Method 2: Activated event
-        local activatedEvent = button:FindFirstChild("Activated")
-        if activatedEvent then
-            print("Found Activated event, firing...")
-            pcall(activatedEvent.Fire, activatedEvent)
-            return true
-        end
-
-        -- Method 3: Simulated mouse click (fallback)
-        print("Attempting simulated click...")
-        local success, err = pcall(function()
-            local absPos = button.AbsolutePosition
-            local absSize = button.AbsoluteSize
-            
-            -- Validasi ukuran button
-            if absSize.X <= 0 or absSize.Y <= 0 then
-                error("Invalid button size")
-            end
-            
-            local center = absPos + absSize/2
-            
-            -- Triple click untuk memastikan
-            for i = 1, 3 do
-                print("Sending mouse click", i)
-                UserInputService:SendMouseButtonEvent(
-                    center.X, center.Y, 0, true, game, 1
-                )
-                task.wait(0.15)
-                UserInputService:SendMouseButtonEvent(
-                    center.X, center.Y, 0, false, game, 1
-                )
-                task.wait(0.35)
-            end
-        end)
-        
-        if not success then
-            warn("Simulated click failed:", err)
-        end
-        
-        return success
+    print("📦 Upvalues:")
+    for i = 1, debug.getupvalue(targetFunc, math.huge) do
+        local name, val = debug.getupvalue(targetFunc, i)
+        print(i, name, val)
     end
-
-    -- Prioritas pencarian
-    local searchPatterns = {
-        {type = "TextButton", text = "Accept"}, -- Exact text match
-        {type = "TextButton", name = "accept"}, -- Case insensitive
-        {type = "ImageButton", name = "accept"},
-        {type = "TextButton", text = "Confirm"},
-        {type = "TextButton", text = "OK"}
-    }
-
-    for _, screen in ipairs(gui:GetChildren()) do
-        if screen:IsA("ScreenGui") and screen.Enabled then
-            print("Scanning ScreenGui:", screen.Name)
-            
-            for _, pattern in ipairs(searchPatterns) do
-                for _, descendant in ipairs(screen:GetDescendants()) do
-                    if descendant:IsA(pattern.type) then
-                        local match = false
-                        
-                        if pattern.text and descendant:IsA("TextButton") then
-                            match = string.lower(descendant.Text) == string.lower(pattern.text)
-                        elseif pattern.name then
-                            match = string.find(string.lower(descendant.Name), string.lower(pattern.name))
-                        end
-                        
-                        if match then
-                            print("Found candidate button:", descendant:GetFullName())
-                            if tryClick(descendant) then
-                                print("Successfully clicked button!")
-                                return true
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    warn("No clickable accept button found after thorough search")
-    return false
-end
--- ==============================================
--- END OF MODIFIED FUNCTION
--- ==============================================
-
--- Main function with Delta compatibility (UNCHANGED)
-local function main()
-    while task.wait(CHECK_INTERVAL) do
-        local response = makeHttpRequest("GET", "/getInstanceId")
-        if response and response.StatusCode == 200 then
-            local success, data = pcall(HttpService.JSONDecode, HttpService, response.Body)
-            if success and data.instanceId then
-                if data.instanceId == game.JobId then
-                    -- In correct instance
-                    pcall(function()
-                        TextChatService.TextChannels.RBXGeneral:SendAsync(CHAT_MESSAGE)
-                    end)
-                    
-                    -- Enhanced: Try clicking multiple times
-                    for i = 1, 3 do
-                        if clickAcceptButton() then break end
-                        task.wait(0.5)
-                    end
-                else
-                    -- Need to teleport
-                    pcall(function()
-                        TeleportService:TeleportToPlaceInstance(PLACE_ID, data.instanceId, Players.LocalPlayer)
-                    end)
-                end
-            end
-        end
-    end
-end
-
--- Start script with error handling (UNCHANGED)
-local success, err = pcall(main)
-if not success then
-    warn("Script error:", err)
+else
+    warn("❌ Function tidak ditemukan.")
 end
