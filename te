@@ -3,6 +3,7 @@ local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 
 -- ======= CONFIGURATION =======
 local REDIS_API_URL = "https://api-beta-mocha-45.vercel.app/api"
@@ -12,10 +13,28 @@ local INSTANCE_TIMEOUT = 120 -- 2 minutes in seconds
 local CHAT_MESSAGE = "dsadadsadas"  -- Message to send when in correct instance
 -- =============================
 
--- Improved HTTP request function
+-- Safe HTTP request function with better error handling
 local function makeHttpRequest(method, endpoint, body)
-    local requestFunc = syn and syn.request or http_request or request
-    if not requestFunc then return nil end
+    -- Check for available request functions in order of preference
+    local requestFunc
+    local requestSources = {
+        syn and syn.request,
+        http and http.request,
+        http_request,
+        request
+    }
+    
+    for _, source in ipairs(requestSources) do
+        if type(source) == "function" then
+            requestFunc = source
+            break
+        end
+    end
+    
+    if not requestFunc then
+        warn("No valid HTTP request function found")
+        return nil
+    end
     
     local url = REDIS_API_URL .. endpoint
     local requestData = {
@@ -31,79 +50,106 @@ local function makeHttpRequest(method, endpoint, body)
     end
     
     local success, response = pcall(requestFunc, requestData)
-    return success and response or nil
+    if not success then
+        warn("HTTP request failed:", response)
+        return nil
+    end
+    return response
 end
 
--- Function to get current active instance
+-- Function to get current active instance with error handling
 local function getCurrentInstance()
     local response = makeHttpRequest("GET", "/getInstanceId")
     if response and response.StatusCode == 200 then
-        local data = HttpService:JSONDecode(response.Body)
-        return data.instanceId
+        local success, data = pcall(HttpService.JSONDecode, HttpService, response.Body)
+        if success then
+            return data.instanceId
+        else
+            warn("JSON decode failed:", data)
+        end
+    else
+        warn("Failed to get instance ID. Status:", response and response.StatusCode or "no response")
     end
     return nil
 end
 
--- Universal chat message function
+-- Universal chat message function with better fallbacks
 local function sendChatMessage(message)
-    -- Try new TextChatService first
-    if TextChatService and TextChatService.TextChannels then
-        local channel = TextChatService.TextChannels.RBXGeneral
-        if channel then
-            pcall(function() channel:SendAsync(message) end)
-            return
+    local success, err = pcall(function()
+        -- Try new TextChatService first
+        if TextChatService and TextChatService.TextChannels then
+            local channel = TextChatService.TextChannels:FindFirstChild("RBXGeneral") or TextChatService.TextChannels:FindFirstChildWhichIsA("TextChannel")
+            if channel then
+                channel:SendAsync(message)
+                return
+            end
         end
-    end
+        
+        -- Fallback to legacy chat system
+        local chatEvents = game:GetService("ReplicatedStorage"):FindFirstChild("DefaultChatSystemChatEvents")
+        if chatEvents then
+            local sayMessage = chatEvents:FindFirstChild("SayMessageRequest")
+            if sayMessage then
+                sayMessage:FireServer(message, "All")
+            end
+        end
+    end)
     
-    -- Fallback to legacy chat system
-    local chatEvents = game:GetService("ReplicatedStorage"):FindFirstChild("DefaultChatSystemChatEvents")
-    if chatEvents then
-        local sayMessage = chatEvents:FindFirstChild("SayMessageRequest")
-        if sayMessage then
-            pcall(function() sayMessage:FireServer(message, "All") end)
-        end
+    if not success then
+        warn("Failed to send chat message:", err)
     end
 end
 
--- Function to find and click an Accept button
+-- Enhanced function to find and click an Accept button
 local function clickAcceptButton()
-    -- Search for a button with "Accept" in its name
     local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
     if not gui then return false end
-    
-    local function searchForButton(parent)
-        for _, child in ipairs(parent:GetDescendants()) do
-            if child:IsA("TextButton") or child:IsA("ImageButton") then
-                if string.find(string.lower(child.Name), "accept") then
-                    -- Found an accept button, try to click it
-                    pcall(function()
-                        if child:IsA("TextButton") or child:IsA("ImageButton") then
-                            local absolutePosition = child.AbsolutePosition
-                            local absoluteSize = child.AbsoluteSize
-                            local center = absolutePosition + absoluteSize / 2
-                            
-                            -- Simulate mouse click
-                            UserInputService:SendMouseButtonEvent(
-                                center.X, center.Y, 0, true, game, 1
-                            )
-                            task.wait()
-                            UserInputService:SendMouseButtonEvent(
-                                center.X, center.Y, 0, false, game, 1
-                            )
-                            return true
-                        end
-                    end)
-                end
-            end
-        end
-        return false
-    end
-    
-    -- Search through all screens
+
+    -- List of possible button names to look for
+    local targetNames = {
+        "accept", "acceptbtn", "btnaccept", "buttonaccept", 
+        "join", "joinbtn", "btnjoin", "buttonjoin",
+        "confirm", "confirmbtn", "btnconfirm", "buttonconfirm",
+        "ok", "okbtn", "btnok", "buttonok"
+    }
+
+    -- Search through all enabled ScreenGuis
     for _, screen in ipairs(gui:GetChildren()) do
         if screen:IsA("ScreenGui") and screen.Enabled then
-            if searchForButton(screen) then
-                return true
+            for _, descendant in ipairs(screen:GetDescendants()) do
+                if (descendant:IsA("TextButton") or (descendant:IsA("ImageButton")) then
+                    local lowerName = string.lower(descendant.Name)
+                    for _, target in ipairs(targetNames) do
+                        if string.find(lowerName, target) then
+                            if descendant.Visible and descendant.Active then
+                                -- Try different click methods
+                                local clickEvent = descendant:FindFirstChild("MouseButton1Click")
+                                if clickEvent then
+                                    pcall(clickEvent.Fire, clickEvent)
+                                    return true
+                                end
+                                
+                                local activatedEvent = descendant:FindFirstChild("Activated")
+                                if activatedEvent then
+                                    pcall(activatedEvent.Fire, activatedEvent)
+                                    return true
+                                end
+                                
+                                -- Fallback to mouse simulation
+                                pcall(function()
+                                    local absPos = descendant.AbsolutePosition
+                                    local absSize = descendant.AbsoluteSize
+                                    local center = absPos + absSize/2
+                                    UserInputService:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1)
+                                    task.wait(0.1)
+                                    UserInputService:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
+                                end)
+                                
+                                return true
+                            end
+                        end
+                    end
+                end
             end
         end
     end
@@ -111,68 +157,28 @@ local function clickAcceptButton()
     return false
 end
 
--- Function to handle instance joining logic
-local function handleInstance(newInstanceId)
-    local currentInstanceId = game.JobId
-    
-    if newInstanceId == currentInstanceId then
-        -- If already in the correct instance
-        sendChatMessage(CHAT_MESSAGE)
-        print("Already in the correct instance, searching for Accept button...")
-        
-        -- Try to find and click an Accept button
-        if clickAcceptButton() then
-            print("Found and clicked Accept button!")
-        else
-            print("No Accept button found.")
-        end
-        
-        return false  -- Indicate we should keep waiting
-    else
-        -- If new instance found, attempt to join
-        print("Found new instance, attempting to teleport...")
-        local success = pcall(function()
-            TeleportService:TeleportToPlaceInstance(PLACE_ID, newInstanceId, Players.LocalPlayer)
+-- Main monitoring loop with detailed error handling
+local function mainLoop()
+    while true do
+        local success, err = pcall(function()
+            local newInstanceId = getCurrentInstance()
+            if newInstanceId then
+                if newInstanceId == game.JobId then
+                    sendChatMessage(CHAT_MESSAGE)
+                    print("In correct instance. Searching for accept button...")
+                    clickAcceptButton()
+                else
+                    print("Attempting to teleport to new instance...")
+                    TeleportService:TeleportToPlaceInstance(PLACE_ID, newInstanceId, Players.LocalPlayer)
+                    task.wait(10) -- Wait for teleport to complete
+                end
+            else
+                print("No instance ID received from server")
+            end
         end)
         
-        if success then
-            -- Verify teleport success
-            local startTime = os.time()
-            while os.time() - startTime < 30 do
-                if game.JobId == newInstanceId then
-                    sendChatMessage(CHAT_MESSAGE)
-                    return true  -- Successfully joined new instance
-                end
-                task.wait(1)
-            end
-            warn("Timeout: Failed to verify join")
-        else
-            warn("Teleport failed")
-        end
-        return false  -- Teleport failed
-    end
-end
-
--- Main monitoring loop
-local function mainLoop()
-    local lastCleanupTime = os.time()
-    
-    while true do
-        -- Clean up old instances periodically
-        if os.time() - lastCleanupTime > 60 then
-            pcall(function()
-                makeHttpRequest("POST", "/cleanupInstances", {timeout = INSTANCE_TIMEOUT})
-            end)
-            lastCleanupTime = os.time()
-        end
-
-        -- Check for new instance
-        local newInstanceId = getCurrentInstance()
-        
-        if newInstanceId then
-            handleInstance(newInstanceId)
-        else
-            print("No new instances available, waiting...")
+        if not success then
+            warn("Error in main loop iteration:", err)
         end
         
         task.wait(CHECK_INTERVAL)
@@ -184,12 +190,16 @@ local function startWithRetry()
     while true do
         local success, err = pcall(mainLoop)
         if not success then
-            warn("Main loop error:", err)
+            warn("Main loop crashed:", err)
             print("Restarting in 30 seconds...")
             task.wait(30)
         end
     end
 end
 
--- Begin execution
-startWithRetry()
+-- Begin execution with protection
+print("Script starting...")
+local success, err = pcall(startWithRetry)
+if not success then
+    warn("Fatal startup error:", err)
+end
