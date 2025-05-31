@@ -2,18 +2,16 @@ local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local TextChatService = game:GetService("TextChatService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- Konfigurasi
 local REDIS_API_URL = "https://api-beta-mocha-45.vercel.app/api"
 local PLACE_ID = 126884695634066
 local CHECK_INTERVAL = 15
-local INSTANCE_TIMEOUT = 120
-local CHAT_MESSAGE = "dsadadsadas"
-local GIFT_COOLDOWN = 5
 local PLAYER_DETECTION_RADIUS = 20
+local CHAT_MESSAGE = "dsadadsadas"
+local MAX_CHAT_PER_INSTANCE = 3
 
-local lastGiftCheck = 0
+local chatCount = 0
 
 -- Fungsi cek player lain
 local function isPlayerNearby()
@@ -59,112 +57,6 @@ local function makeHttpRequest(method, endpoint, body)
     return success and response or nil
 end
 
--- Fungsi untuk menerima gift tanpa klik, coba remote dari GameEvents yang kamu temukan
-local function acceptGiftsWithoutClick()
-    if os.time() - lastGiftCheck < GIFT_COOLDOWN then return false end
-    lastGiftCheck = os.time()
-
-    -- Remote gift dari GameEvents
-    local gameEvents = ReplicatedStorage:FindFirstChild("GameEvents")
-    local giftRemotes = {}
-    if gameEvents then
-        for _, name in ipairs({"FriendsGiftEvent", "PetGiftingService", "GiftPet", "AcceptPetGift"}) do
-            local remote = gameEvents:FindFirstChild(name)
-            if remote and remote:IsA("RemoteEvent") then
-                table.insert(giftRemotes, remote)
-            end
-        end
-    end
-
-    -- Coba FireServer pada semua remote gift yang ditemukan
-    for _, remote in ipairs(giftRemotes) do
-        local success, err = pcall(function()
-            -- Coba beberapa parameter umum, sesuaikan jika perlu
-            remote:FireServer()
-            remote:FireServer("accept")
-            remote:FireServer(true)
-            remote:FireServer("accept_all")
-            remote:FireServer({action="accept"})
-        end)
-        if success then
-            print("🎁 Gift diterima via RemoteEvent:", remote:GetFullName())
-            return true
-        else
-            warn("Gagal FireServer pada", remote:GetFullName(), "Error:", err)
-        end
-    end
-
-    -- Jika belum berhasil, coba remote lama (jika ada)
-    local fallbackRemotes = {
-        ReplicatedStorage:FindFirstChild("AcceptGiftRemote"),
-        ReplicatedStorage:FindFirstChild("GiftAcceptRemote"),
-        ReplicatedStorage:FindFirstChild("GiftSystemRemote"),
-        ReplicatedStorage:FindFirstChild("GiftEvent"),
-        ReplicatedStorage:FindFirstChild("GiftNetwork"),
-        ReplicatedStorage:FindFirstChild("GiftHandler")
-    }
-
-    for _, remote in ipairs(fallbackRemotes) do
-        if remote and remote:IsA("RemoteEvent") then
-            local success, err = pcall(function()
-                remote:FireServer()
-                remote:FireServer("accept")
-                remote:FireServer(true)
-                remote:FireServer("accept_all")
-            end)
-            if success then
-                print("🎁 Gift diterima via RemoteEvent (fallback):", remote:GetFullName())
-                return true
-            else
-                warn("Gagal FireServer pada fallback", remote:GetFullName(), "Error:", err)
-            end
-        end
-    end
-
-    -- Method 2: BindableEvent di PlayerGui (jika ada)
-    local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
-    if gui then
-        for _, bindable in ipairs(gui:GetDescendants()) do
-            if bindable:IsA("BindableEvent") and string.find(string.lower(bindable.Name), "gift") then
-                local success, err = pcall(function()
-                    bindable:Fire()
-                    bindable:Fire("accept")
-                end)
-                if success then
-                    print("🎁 Gift diterima via BindableEvent:", bindable:GetFullName())
-                    return true
-                else
-                    warn("Gagal Fire BindableEvent", bindable:GetFullName(), "Error:", err)
-                end
-            end
-        end
-    end
-
-    -- Method 3: Cek folder Gifts di player dan FireServer dengan nama gift
-    if Players.LocalPlayer:FindFirstChild("Gifts") then
-        for _, gift in ipairs(Players.LocalPlayer.Gifts:GetChildren()) do
-            if gift:IsA("Folder") or gift:IsA("ValueBase") then
-                local success, err = pcall(function()
-                    if ReplicatedStorage:FindFirstChild("GiftSystem") then
-                        ReplicatedStorage.GiftSystem:FireServer("accept", gift.Name)
-                    elseif ReplicatedStorage:FindFirstChild("GiftHandler") then
-                        ReplicatedStorage.GiftHandler:FireServer("accept", gift.Name)
-                    end
-                end)
-                if success then
-                    print("🎁 Gift diterima via GiftSystem:", gift.Name)
-                    return true
-                else
-                    warn("Gagal FireServer GiftSystem/GiftHandler untuk gift", gift.Name, "Error:", err)
-                end
-            end
-        end
-    end
-
-    print("❌ Tidak ditemukan metode untuk menerima gift secara langsung")
-    return false
-end
-
 -- Fungsi utama
 local function main()
     while task.wait(CHECK_INTERVAL) do
@@ -175,15 +67,16 @@ local function main()
                 if data.instanceId == game.JobId then
                     print("✅ Instance cocok, menjalankan tugas...")
 
-                    -- Menerima gift secara otomatis tanpa klik
-                    acceptGiftsWithoutClick()
-
                     if isPlayerNearby() then
                         print("👥 Player lain terdeteksi - skip chat")
-                    else
+                    elseif chatCount < MAX_CHAT_PER_INSTANCE then
                         pcall(function()
                             TextChatService.TextChannels.RBXGeneral:SendAsync(CHAT_MESSAGE)
+                            chatCount += 1
+                            print("💬 Chat ke-", chatCount)
                         end)
+                    else
+                        print("💬 Batas chat tercapai untuk instance ini")
                     end
                 else
                     print("❌ Berada di instance salah, teleporting...")
