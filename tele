@@ -3,7 +3,6 @@ local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
 
 -- ======= CONFIGURATION =======
 local REDIS_API_URL = "https://api-beta-mocha-45.vercel.app/api"
@@ -66,122 +65,50 @@ local function sendChatMessage(message)
     end
 end
 
--- Enhanced function to find and click an Accept button
+-- Function to find and click an Accept button
 local function clickAcceptButton()
-    -- Wait for the GUI to load if needed
-    task.wait(1)
-    
+    -- Search for a button with "Accept" in its name
     local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
-    if not gui then
-        print("No PlayerGui found")
+    if not gui then return false end
+    
+    local function searchForButton(parent)
+        for _, child in ipairs(parent:GetDescendants()) do
+            if child:IsA("TextButton") or child:IsA("ImageButton") then
+                if string.find(string.lower(child.Name), "accept") then
+                    -- Found an accept button, try to click it
+                    pcall(function()
+                        if child:IsA("TextButton") or child:IsA("ImageButton") then
+                            local absolutePosition = child.AbsolutePosition
+                            local absoluteSize = child.AbsoluteSize
+                            local center = absolutePosition + absoluteSize / 2
+                            
+                            -- Simulate mouse click
+                            UserInputService:SendMouseButtonEvent(
+                                center.X, center.Y, 0, true, game, 1
+                            )
+                            task.wait()
+                            UserInputService:SendMouseButtonEvent(
+                                center.X, center.Y, 0, false, game, 1
+                            )
+                            return true
+                        end
+                    end)
+                end
+            end
+        end
         return false
     end
-
-    -- List of possible button names to look for (case insensitive)
-    local targetNames = {
-        "accept", "acceptbtn", "btnaccept", "buttonaccept", 
-        "join", "joinbtn", "btnjoin", "buttonjoin",
-        "confirm", "confirmbtn", "btnconfirm", "buttonconfirm"
-    }
-
-    local foundButton = nil
-
-    -- Search through all enabled ScreenGuis
+    
+    -- Search through all screens
     for _, screen in ipairs(gui:GetChildren()) do
         if screen:IsA("ScreenGui") and screen.Enabled then
-            -- Search through all descendants
-            for _, descendant in ipairs(screen:GetDescendants()) do
-                if (descendant:IsA("TextButton") or (descendant:IsA("ImageButton")) then
-                    -- Check if button name matches any target
-                    local lowerName = string.lower(descendant.Name)
-                    for _, target in ipairs(targetNames) do
-                        if string.find(lowerName, target) then
-                            -- Additional check for visible/active button
-                            if descendant.Visible and descendant.Active then
-                                foundButton = descendant
-                                break
-                            end
-                        end
-                    end
-                    if foundButton then break end
-                end
+            if searchForButton(screen) then
+                return true
             end
-            if foundButton then break end
         end
     end
-
-    if not foundButton then
-        print("No accept button found after searching")
-        return false
-    end
-
-    print("Found button:", foundButton:GetFullName())
-
-    -- Try different methods to click the button
-    local success = false
-
-    -- Method 1: Fire the button's MouseButton1Click event if available
-    if not success then
-        local clickEvent = foundButton:FindFirstChild("MouseButton1Click")
-        if clickEvent then
-            pcall(function()
-                clickEvent:Fire()
-                success = true
-                print("Clicked via MouseButton1Click event")
-            end)
-        end
-    end
-
-    -- Method 2: Fire the button's Activated event if available
-    if not success then
-        local activatedEvent = foundButton:FindFirstChild("Activated")
-        if activatedEvent then
-            pcall(function()
-                activatedEvent:Fire()
-                success = true
-                print("Clicked via Activated event")
-            end)
-        end
-    end
-
-    -- Method 3: Simulate mouse click (fallback)
-    if not success then
-        pcall(function()
-            -- Wait for the button to be ready
-            local startTime = os.clock()
-            while os.clock() - startTime < 2 do
-                if foundButton.AbsoluteSize ~= Vector2.new(0, 0) then
-                    break
-                end
-                task.wait()
-            end
-
-            local absolutePosition = foundButton.AbsolutePosition
-            local absoluteSize = foundButton.AbsoluteSize
-            local center = absolutePosition + absoluteSize / 2
-
-            -- Multiple click attempts
-            for i = 1, 3 do
-                UserInputService:SendMouseButtonEvent(
-                    center.X, center.Y, 0, true, game, 1
-                )
-                task.wait(0.1)
-                UserInputService:SendMouseButtonEvent(
-                    center.X, center.Y, 0, false, game, 1
-                )
-                task.wait(0.5)
-                
-                -- Check if click was successful (you might need game-specific checks here)
-                if not foundButton.Visible then
-                    success = true
-                    break
-                end
-            end
-            print("Attempted simulated mouse click")
-        end)
-    end
-
-    return success
+    
+    return false
 end
 
 -- Function to handle instance joining logic
@@ -193,24 +120,11 @@ local function handleInstance(newInstanceId)
         sendChatMessage(CHAT_MESSAGE)
         print("Already in the correct instance, searching for Accept button...")
         
-        -- Try to find and click an Accept button with retries
-        local attempts = 0
-        local maxAttempts = 3
-        local clicked = false
-        
-        while attempts < maxAttempts and not clicked do
-            attempts += 1
-            print(string.format("Attempt %d/%d to find Accept button", attempts, maxAttempts))
-            clicked = clickAcceptButton()
-            if not clicked then
-                task.wait(1) -- Wait before retrying
-            end
-        end
-        
-        if clicked then
-            print("Successfully clicked Accept button!")
+        -- Try to find and click an Accept button
+        if clickAcceptButton() then
+            print("Found and clicked Accept button!")
         else
-            print("Failed to find/click Accept button after", maxAttempts, "attempts")
+            print("No Accept button found.")
         end
         
         return false  -- Indicate we should keep waiting
