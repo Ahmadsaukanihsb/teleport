@@ -3,98 +3,105 @@ local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
 
--- ======= CONFIGURATION =======
+-- Delta-compatible configuration
 local REDIS_API_URL = "https://api-beta-mocha-45.vercel.app/api"
-local PLACE_ID = 126884695634066  -- Replace with your game ID
-local CHECK_INTERVAL = 15    -- Seconds between checks
-local INSTANCE_TIMEOUT = 120 -- 2 minutes in seconds
-local CHAT_MESSAGE = "dsadadsadas"  -- Message to send when in correct instance
--- =============================
+local PLACE_ID = 126884695634066
+local CHECK_INTERVAL = 15
+local INSTANCE_TIMEOUT = 120
+local CHAT_MESSAGE = "dsadadsadas"
 
--- More robust HTTP request function
+-- Delta-compatible HTTP request function
 local function makeHttpRequest(method, endpoint, body)
-    -- Check for available request functions
-    local requestFunc
-    if syn and syn.request then
-        requestFunc = syn.request
-    elseif http_request then
-        requestFunc = http_request
-    elseif request then
-        requestFunc = request
-    else
-        warn("No HTTP request function available")
+    local requestFunc = http and http.request or http_request or request
+    if not requestFunc then
+        warn("HTTP function not available in Delta")
         return nil
     end
-    
+
     local url = REDIS_API_URL .. endpoint
-    local requestData = {
-        Url = url,
-        Method = method,
-        Headers = {
-            ["Content-Type"] = "application/json"
-        }
-    }
-    
-    if body then
-        requestData.Body = HttpService:JSONEncode(body)
-    end
-    
-    local success, response = pcall(requestFunc, requestData)
-    if not success then
-        warn("HTTP request failed:", response)
-        return nil
-    end
-    return response
+    local success, response = pcall(function()
+        return requestFunc({
+            Url = url,
+            Method = method,
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = body and HttpService:JSONEncode(body) or nil
+        })
+    end)
+
+    return success and response or nil
 end
 
--- Rest of your functions remain the same (getCurrentInstance, sendChatMessage, clickAcceptButton, handleInstance, etc.)
--- Make sure to keep all the other functions we defined previously
+-- Delta-compatible button clicker
+local function clickAcceptButton()
+    local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if not gui then return false end
 
--- Modified main loop with better error handling
-local function mainLoop()
-    local lastCleanupTime = os.time()
+    local targetNames = {"accept", "join", "confirm", "ok"}
     
-    while true do
-        -- Clean up old instances periodically
-        if os.time() - lastCleanupTime > 60 then
-            pcall(function()
-                makeHttpRequest("POST", "/cleanupInstances", {timeout = INSTANCE_TIMEOUT})
-            end)
-            lastCleanupTime = os.time()
-        end
-
-        -- Check for new instance
-        local newInstanceId = getCurrentInstance()
-        
-        if newInstanceId then
-            local success, err = pcall(handleInstance, newInstanceId)
-            if not success then
-                warn("Error in handleInstance:", err)
+    for _, screen in ipairs(gui:GetChildren()) do
+        if screen:IsA("ScreenGui") and screen.Enabled then
+            for _, descendant in ipairs(screen:GetDescendants()) do
+                if (descendant:IsA("TextButton") or descendant:IsA("ImageButton")) then
+                    local lowerName = string.lower(descendant.Name)
+                    for _, target in ipairs(targetNames) do
+                        if string.find(lowerName, target) then
+                            if descendant.Visible and descendant.Active then
+                                -- Try to fire click event directly first
+                                local clickEvent = descendant:FindFirstChild("MouseButton1Click")
+                                if clickEvent then
+                                    pcall(clickEvent.Fire, clickEvent)
+                                    return true
+                                end
+                                
+                                -- Fallback to mouse simulation
+                                pcall(function()
+                                    local absPos = descendant.AbsolutePosition
+                                    local absSize = descendant.AbsoluteSize
+                                    local center = absPos + absSize/2
+                                    UserInputService:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1)
+                                    task.wait(0.1)
+                                    UserInputService:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
+                                end)
+                                return true
+                            end
+                        end
+                    end
+                end
             end
-        else
-            print("No new instances available, waiting...")
         end
-        
-        task.wait(CHECK_INTERVAL)
+    end
+    return false
+end
+
+-- Main function with Delta compatibility
+local function main()
+    while task.wait(CHECK_INTERVAL) do
+        local response = makeHttpRequest("GET", "/getInstanceId")
+        if response and response.StatusCode == 200 then
+            local success, data = pcall(HttpService.JSONDecode, HttpService, response.Body)
+            if success and data.instanceId then
+                if data.instanceId == game.JobId then
+                    -- In correct instance
+                    pcall(function()
+                        TextChatService.TextChannels.RBXGeneral:SendAsync(CHAT_MESSAGE)
+                    end)
+                    clickAcceptButton()
+                else
+                    -- Need to teleport
+                    pcall(function()
+                        TeleportService:TeleportToPlaceInstance(PLACE_ID, data.instanceId, Players.LocalPlayer)
+                    end)
+                end
+            end
+        end
     end
 end
 
--- Start with error recovery
-local function startWithRetry()
-    while true do
-        local success, err = pcall(mainLoop)
-        if not success then
-            warn("Main loop error:", err)
-            print("Restarting in 30 seconds...")
-            task.wait(30)
-        end
-    end
-end
-
--- Begin execution with additional safety checks
-local success, err = pcall(startWithRetry)
+-- Start script with error handling
+local success, err = pcall(main)
 if not success then
-    warn("Fatal error in startup:", err)
+    warn("Script error:", err)
 end
