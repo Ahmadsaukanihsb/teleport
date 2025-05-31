@@ -126,40 +126,67 @@ local function collectGifts()
     lastGiftCheck = os.time()
 
     local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
-    if not gui then return false end
-
-    local giftFrame = gui:FindFirstChild("Gift_Notification", true)
-    if not giftFrame then
-        print("❌ Gift_Notification tidak ditemukan")
-        return false
+    if not gui then 
+        print("❌ PlayerGui tidak ditemukan")
+        return false 
     end
 
-    local found = false
-    for _, btn in ipairs(giftFrame:GetDescendants()) do
-        if (btn:IsA("ImageButton") or btn:IsA("TextButton")) and btn.Visible and btn.Active then
-            local nameLower = string.lower(btn.Name)
-            if string.find(nameLower, "accept") or string.find(nameLower, "claim") or string.find(nameLower, "ok") then
-                print("✅ Tombol ditemukan:", btn:GetFullName())
-
-                pcall(function()
-                    local center = btn.AbsolutePosition + btn.AbsoluteSize / 2
-                    VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1)
-                    task.wait(0.1)
-                    VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
-                end)
-
-                found = true
-                break
-            end
+    -- Cari semua frame gift yang mungkin ada (untuk handle multiple gifts)
+    local giftFrames = {}
+    for _, screen in ipairs(gui:GetDescendants()) do
+        if screen:IsA("Frame") and screen.Name == "Gift_Notification" then
+            table.insert(giftFrames, screen)
         end
     end
 
-    if not found then
-        print("❌ Tidak menemukan tombol 'Accept' dalam Gift_Notification")
-        debugGiftGui()
+    if #giftFrames == 0 then
+        print("❌ Tidak ada gift notification yang ditemukan")
+        return false
     end
 
-    return found
+    local successCount = 0
+    
+    for _, giftFrame in ipairs(giftFrames) do
+        -- Cari tombol Accept dalam frame gift
+        local acceptButton = giftFrame:FindFirstChild("Accept", true)
+        
+        if acceptButton and acceptButton:IsA("TextButton") and acceptButton.Visible and acceptButton.Active then
+            print("✅ Tombol Accept ditemukan:", acceptButton:GetFullName())
+            
+            -- Method 1: Coba fire event klik langsung
+            local clickEvent = acceptButton:FindFirstChildOfClass("RemoteEvent") or 
+                             acceptButton:FindFirstChild("MouseButton1Click")
+            
+            if clickEvent then
+                pcall(function()
+                    clickEvent:Fire()
+                    successCount = successCount + 1
+                    print("🎁 Gift diterima (via event)")
+                end)
+            else
+                -- Method 2: Gunakan virtual click sebagai fallback
+                pcall(function()
+                    local absPos = acceptButton.AbsolutePosition
+                    local absSize = acceptButton.AbsoluteSize
+                    local centerX = absPos.X + absSize.X/2
+                    local centerY = absPos.Y + absSize.Y/2
+                    
+                    VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, true, game, 1)
+                    task.wait(0.1)
+                    VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, false, game, 1)
+                    successCount = successCount + 1
+                    print("🎁 Gift diterima (via virtual click)")
+                end)
+            end
+            
+            -- Tunggu sebentar antara setiap gift
+            task.wait(0.5)
+        else
+            print("❌ Tombol Accept tidak aktif atau tidak ditemukan dalam frame")
+        end
+    end
+
+    return successCount > 0
 end
 
 
