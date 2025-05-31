@@ -6,90 +6,114 @@ local localPlayer = Players.LocalPlayer
 local GIFT_COOLDOWN = 3
 local lastGiftCheck = 0
 
--- Improved function to accept friend gifts
-local function acceptFriendGifts()
-    local friendGiftEvent = ReplicatedStorage:FindFirstChild("FriendGiftEvent") or ReplicatedStorage:FindFirstChild("FriendGiftRemote")
-    if not friendGiftEvent then return false end
-
-    -- Try different parameter formats based on common game implementations
-    local success, response = pcall(function()
-        -- Try simple string first
-        if friendGiftEvent:IsA("RemoteEvent") then
-            return friendGiftEvent:FireServer("AcceptAllGifts")
-        elseif friendGiftEvent:IsA("RemoteFunction") then
-            return friendGiftEvent:InvokeServer("AcceptAllGifts")
-        end
-    end)
-    
-    if not success then
-        success = pcall(function()
-            -- Try with player ID
-            if friendGiftEvent:IsA("RemoteEvent") then
-                friendGiftEvent:FireServer({Action = "AcceptAll", PlayerId = localPlayer.UserId})
-            end
-        end)
+-- Enhanced function to find gift-related remotes
+local function findGiftRemote(names)
+    for _, name in ipairs(names) do
+        local remote = ReplicatedStorage:FindFirstChild(name)
+        if remote then return remote end
     end
-    
-    return success
+    return nil
 end
 
--- Improved function to accept pet gifts
-local function acceptPetGifts()
-    local petGiftService = ReplicatedStorage:FindFirstChild("PetGiftingService") or ReplicatedStorage:FindFirstChild("PetGiftRemote")
-    if not petGiftService then return false end
-
-    local success = pcall(function()
-        if petGiftService:IsA("RemoteEvent") then
-            petGiftService:FireServer("ClaimAllGifts")
-        elseif petGiftService:IsA("RemoteFunction") then
-            petGiftService:InvokeServer("ClaimAllGifts")
-        end
-        return true
-    end)
+-- Improved function to accept all types of gifts
+local function acceptAllGifts()
+    -- Try common gift remote names
+    local giftRemotes = {
+        "GiftSystemRemote",
+        "GiftEvent",
+        "ClaimGifts",
+        "GiftHandler",
+        "GiftManager",
+        "ReceiveGifts",
+        "GiftCollector"
+    }
     
-    if not success then
-        success = pcall(function()
-            if petGiftService:IsA("RemoteEvent") then
-                petGiftService:FireServer({
-                    Action = "ClaimAll",
-                    UserId = localPlayer.UserId
-                })
+    local remote = findGiftRemote(giftRemotes)
+    if not remote then return false end
+
+    -- Try different parameter formats
+    local formats = {
+        "ClaimAll",
+        "AcceptAllGifts",
+        "CollectAll",
+        {Action = "ClaimAllGifts"},
+        {Action = "CollectAll", UserId = localPlayer.UserId},
+        {Cmd = "ClaimAll", Player = localPlayer}
+    }
+
+    for _, format in ipairs(formats) do
+        local success = pcall(function()
+            if remote:IsA("RemoteEvent") then
+                remote:FireServer(format)
+            elseif remote:IsA("RemoteFunction") then
+                remote:InvokeServer(format)
             end
+            return true
         end)
+        if success then return true end
     end
     
-    return success
+    return false
 end
 
--- Main function with better error handling
+-- Function to check for visible gift notifications
+local function checkForGiftNotifications()
+    -- Check if there are any gift notifications in the UI
+    local gui = localPlayer:FindFirstChildOfClass("PlayerGui")
+    if not gui then return false end
+    
+    -- Common notification names
+    local notificationNames = {
+        "GiftNotification",
+        "NewGiftAlert",
+        "GiftPopup",
+        "RewardNotification",
+        "GiftIcon"
+    }
+    
+    for _, name in ipairs(notificationNames) do
+        local notification = gui:FindFirstChild(name, true)
+        if notification and notification.Visible then
+            return true
+        end
+    end
+    
+    return false
+end
+
+-- Main collection function
 local function collectAllGifts()
     if os.time() - lastGiftCheck < GIFT_COOLDOWN then return end
     lastGiftCheck = os.time()
 
-    print("\n[System] Checking for new gifts...")
+    print("\n[System] Scanning for all gift types...")
     
-    -- Accept friend gifts
-    local friendSuccess = acceptFriendGifts()
-    print(friendSuccess and "[Success] Friend gifts claimed" or "[Warning] No friend gifts available")
+    -- First check if there are visible notifications
+    local hasNotifications = checkForGiftNotifications()
     
-    -- Accept pet gifts
-    local petSuccess = acceptPetGifts()
-    print(petSuccess and "[Success] Pet gifts claimed" or "[Warning] No pet gifts available")
+    -- Try to accept all gifts
+    local success = acceptAllGifts()
+    
+    if success then
+        print("[Success] All available gifts claimed")
+    elseif hasNotifications then
+        print("[Warning] Gifts detected but couldn't claim automatically - may require manual collection")
+    else
+        print("[Info] No gifts available for collection")
+    end
 
-    -- Anti-AFK activity
-    if math.random(1, 10) == 1 then
-        pcall(function()
-            TextChatService.TextChannels.RBXGeneral:SendAsync("Gift collector active - checking for new gifts")
-        end)
+-- Auto-execute with better timing
+local function main()
+    print("Auto-gift collector initialized")
+    while task.wait(GIFT_COOLDOWN) do
+        local success, err = pcall(collectAllGifts)
+        if not success then
+            warn("[Error] During gift collection:", err)
+            -- Increase cooldown if errors occur frequently
+            task.wait(GIFT_COOLDOWN * 2)
+        end
     end
 end
 
--- Auto-execute with better error handling
-while task.wait(GIFT_COOLDOWN) do
-    local success, err = pcall(collectAllGifts)
-    if not success then
-        warn("[Error] Gift collection failed:", err)
-    end
-end
-
-print("Auto-gift collector running successfully!")
+-- Start the script
+pcall(main)
