@@ -1,42 +1,57 @@
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
 local player = Players.LocalPlayer
-local AcceptPetGift = ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("AcceptPetGift")
+local playerGui = player:WaitForChild("PlayerGui")
 
--- Tunggu GUI Gift muncul
-local gui = player:WaitForChild("PlayerGui")
-local found = false
+local gui = playerGui:WaitForChild("GiftNotification", 15)
 
--- Fungsi untuk terima gift otomatis
-local function checkGiftUI(container)
-    for _, frame in ipairs(container:GetChildren()) do
-        if frame:IsA("Frame") or frame:IsA("TextButton") then
-            local petNameLabel = frame:FindFirstChild("PetName") or frame:FindFirstChild("Pet")
-            local senderLabel = frame:FindFirstChild("Sender") or frame:FindFirstChild("From")
-
-            if petNameLabel and senderLabel and petNameLabel:IsA("TextLabel") and senderLabel:IsA("TextLabel") then
-                local petName = petNameLabel.Text
-                local sender = senderLabel.Text
-                print("🎁 Gift ditemukan! Pet:", petName, "| Dari:", sender)
-
-                -- FireServer ke server
-                AcceptPetGift:FireServer(petName, sender)
-                task.wait(0.5)
-                found = true
-            end
-        end
-    end
+print("Daftar anak GiftNotification:")
+for _, child in ipairs(gui:GetChildren()) do
+    print("-", child.Name)
 end
 
--- Cari folder GiftList di GUI (loop aman)
-task.spawn(function()
-    while not found do
-        for _, descendant in ipairs(gui:GetDescendants()) do
-            if descendant:IsA("Frame") and descendant.Name:lower():find("gift") then
-                checkGiftUI(descendant)
-            end
-        end
-        task.wait(1)
+-- Cek anak-anak lebih dalam
+local frame = gui:FindFirstChild("Frame")
+if frame then
+    print("Daftar anak Frame:")
+    for _, child in ipairs(frame:GetChildren()) do
+        print("-", child.Name)
     end
-end)
+
+    local giftNotification = frame:FindFirstChild("Gift_Notification")
+    if giftNotification then
+        print("Daftar anak Gift_Notification:")
+        for _, child in ipairs(giftNotification:GetChildren()) do
+            print("-", child.Name)
+        end
+
+        local holder = giftNotification:FindFirstChild("Holder")
+        if holder then
+            print("Daftar anak Holder:")
+            for _, child in ipairs(holder:GetChildren()) do
+                print("-", child.Name)
+            end
+
+            local petTextLabel = holder:FindFirstChild("TextLabel")
+            local notifUI = holder:FindFirstChild("Notification_UI")
+            local notifTextLabel = notifUI and notifUI:FindFirstChild("TextLabel")
+
+            if petTextLabel then
+                print("Pet TextLabel Text:", petTextLabel.Text)
+            else
+                print("TextLabel pet tidak ditemukan")
+            end
+
+            if notifTextLabel then
+                print("Notification_UI TextLabel Text:", notifTextLabel.Text)
+            else
+                print("Notification_UI TextLabel tidak ditemukan")
+            end
+        else
+            print("Holder tidak ditemukan")
+        end
+    else
+        print("Gift_Notification tidak ditemukan")
+    end
+else
+    print("Frame tidak ditemukan")
+end
