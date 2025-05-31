@@ -1,3 +1,4 @@
+
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
@@ -125,46 +126,73 @@ local function collectGifts()
     lastGiftCheck = os.time()
 
     local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
-    if not gui then return false end
+    if not gui then 
+        print("❌ PlayerGui tidak ditemukan")
+        return false 
+    end
 
-    local giftFrame = gui:FindFirstChild("Gift_Notification", true)
-    if not giftFrame then
-        print("❌ Tombol Accept tidak ditemukan dalam Gift_Notification")
+    -- More specific path based on the error message
+    local giftPath = "PlayerCui.Gift_Notification.Frame.Gift_Notification.Holder.Frame.Accept"
+    local pathParts = string.split(giftPath, ".")
+    local current = gui
+    
+    -- Traverse the path
+    for _, part in ipairs(pathParts) do
+        current = current:FindFirstChild(part)
+        if not current then break end
+    end
+    
+    if current and current:IsA("GuiButton") and current.Visible and current.Active then
+        print("✅ Tombol gift ditemukan:", current:GetFullName())
+        
+        -- Try multiple click methods
+        local success = false
+        
+        -- Method 1: Fire click event if available
+        local clickEvent = current:FindFirstChildOfClass("RemoteEvent") or current:FindFirstChild("MouseButton1Click")
+        if clickEvent then
+            pcall(function()
+                clickEvent:Fire()
+                success = true
+            end)
+        end
+        
+        -- Method 2: Virtual input
+        if not success then
+            pcall(function()
+                local center = current.AbsolutePosition + current.AbsoluteSize/2
+                VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1)
+                task.wait(0.1)
+                VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
+                success = true
+            end)
+        end
+        
+        -- Method 3: Direct property change (for some buttons)
+        if not success and current:IsA("TextButton") then
+            pcall(function()
+                current.Text = current.Text -- Sometimes triggers change
+                current.Selected = true
+                task.wait(0.1)
+                current.Selected = false
+                success = true
+            end)
+        end
+        
+        if success then
+            print("🎁 Berhasil mencoba mengklaim gift")
+        else
+            print("❌ Gagal mengklik tombol gift")
+        end
+        
+        return success
+    else
+        print("❌ Tombol gift tidak ditemukan atau tidak aktif")
+        debugGiftGui()
         return false
     end
-
-    local found = false
-    for _, btn in ipairs(giftFrame:GetDescendants()) do
-        if btn:IsA("TextButton") and btn.Visible and btn.Active then
-            local txt = string.lower(btn.Text or "")
-            if string.find(txt, "accept") or string.find(txt, "claim") or string.find(txt, "ok") then
-                print("✅ Tombol Accept ditemukan:", btn:GetFullName())
-
-                local clickEvent = btn:FindFirstChild("MouseButton1Click") or btn:FindFirstChildOfClass("RemoteEvent")
-                if clickEvent then
-                    pcall(clickEvent.Fire, clickEvent)
-                    print("✔ Klik via event")
-                else
-                    pcall(function()
-                        local center = btn.AbsolutePosition + btn.AbsoluteSize / 2
-                        VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1)
-                        task.wait(0.1)
-                        VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
-                    end)
-                    print("✔ Klik via virtual input")
-                end
-                found = true
-                break
-            end
-        end
-    end
-
-    if not found then
-        print("❌ Tombol Accept tidak ditemukan dalam Gift_Notification")
-        debugGiftGui()
-    end
-    return found
 end
+
 
 -- Fungsi utama
 local function main()
