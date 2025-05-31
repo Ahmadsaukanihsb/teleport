@@ -112,103 +112,98 @@ local function collectGifts()
     local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
     if not gui then return false end
 
-    -- Versi lebih agresif untuk mencari tombol Accept
-    local foundGift = false
-    
-    -- Cari semua ScreenGui yang aktif
-    for _, screen in ipairs(gui:GetChildren()) do
-        if screen:IsA("ScreenGui") and screen.Enabled then
-            -- Debug: Print semua descendant yang mungkin relevan
-            for _, descendant in ipairs(screen:GetDescendants()) do
-                -- Deteksi berdasarkan teks gift
-                if descendant:IsA("TextLabel") and string.find(descendant.Text or "", "Gift from @") then
-                    print("GIFT DITEMUKAN:", descendant:GetFullName())
-                    foundGift = true
-                    
-                    -- Cari semua tombol di hierarchy yang sama
-                    local parent = descendant:FindFirstAncestorOfClass("Frame") or descendant.Parent
-                    if parent then
-                        for _, button in ipairs(parent:GetDescendants()) do
-                            if button:IsA("TextButton") then
-                                print("TOMBOL DITEMUKAN:", button:GetFullName())
-                                
-                                -- Coba klik semua tombol yang mungkin (lebih agresif)
-                                local success = pcall(function()
-                                    -- Method 1: Trigger event klik langsung
-                                    local clickEvent = button:FindFirstChildOfClass("RemoteEvent") or button:FindFirstChild("MouseButton1Click")
-                                    if clickEvent then
-                                        clickEvent:Fire()
-                                        print("KLIK VIA EVENT")
-                                        return true
-                                    end
-                                    
-                                    -- Method 2: Virtual click
-                                    if button.AbsoluteSize.X > 0 and button.AbsoluteSize.Y > 0 then
-                                        local center = button.AbsolutePosition + button.AbsoluteSize/2
-                                        VirtualInputManager:SendMouseButtonEvent(
-                                            center.X, center.Y, 0, true, game, 1)
-                                        task.wait(0.1)
-                                        VirtualInputManager:SendMouseButtonEvent(
-                                            center.X, center.Y, 0, false, game, 1)
-                                        print("KLIK VIA VIRTUAL INPUT")
-                                        return true
-                                    end
-                                end)
-                                
-                                if success then
-                                    print("BERHASIL MENERIMA GIFT")
-                                    return true
-                                end
-                            end
-                        end
-                    end
-                end
+    -- Cari frame gift berdasarkan path yang terlihat di log
+    local giftFrame = gui:FindFirstChild("Gift_Notification")
+    if not giftFrame then
+        print("Frame Gift_Notification tidak ditemukan")
+        return false
+    end
+
+    -- Cari tombol Accept berdasarkan struktur yang terlihat
+    local acceptButton = giftFrame:FindFirstChild("Frame", true):FindFirstChild("Gift_Notification", true)
+                         :FindFirstChild("Holder", true):FindFirstChild("Notification_UI", true)
+                         :FindFirstChild("AcceptButton", true) -- Ganti dengan nama tombol yang sebenarnya
+
+    -- Fallback: Cari tombol berdasarkan teks jika nama tidak ditemukan
+    if not acceptButton then
+        for _, descendant in ipairs(giftFrame:GetDescendants()) do
+            if descendant:IsA("TextButton") and (string.match(string.lower(descendant.Text or ""), "accept") 
+                                               or descendant.Name == "AcceptButton") then
+                acceptButton = descendant
+                break
             end
         end
     end
-    
-    if foundGift then
-        print("GIFT DITEMUKAN TAPI TIDAK BISA DITERIMA")
+
+    if acceptButton then
+        print("Tombol Accept ditemukan:", acceptButton:GetFullName())
+        
+        -- Method 1: Coba klik via event
+        local clickEvent = acceptButton:FindFirstChild("MouseButton1Click") or acceptButton:FindFirstChildOfClass("RemoteEvent")
+        if clickEvent then
+            pcall(clickEvent.Fire, clickEvent)
+            print("Mencoba klik via event")
+            return true
+        end
+
+        -- Method 2: Virtual click
+        if acceptButton.AbsoluteSize.X > 0 and acceptButton.AbsoluteSize.Y > 0 then
+            local center = acceptButton.AbsolutePosition + acceptButton.AbsoluteSize/2
+            pcall(function()
+                VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1)
+                task.wait(0.1)
+                VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
+            end)
+            print("Mencoba klik via virtual input")
+            return true
+        end
     else
-        print("TIDAK ADA GIFT YANG DITEMUKAN")
+        print("Tombol Accept tidak ditemukan dalam frame gift")
     end
-    
+
     return false
 end
 
 -- Modified main function with gift collection and player detection
+-- [ ... Semua kode di atas tetap, tidak berubah, hingga ke bagian 'main' ... ]
+
+-- Modified main function with conditional gift collection and player detection
 local function main()
     while task.wait(CHECK_INTERVAL) do
-        -- First check for gifts
-        collectGifts()
-        
-        -- Check if any players are nearby
-        if isPlayerNearby() then
-            print("Player detected nearby - skipping chat")
-            continue
-        end
-        
-        -- Then handle instance logic (ORIGINAL CODE)
         local response = makeHttpRequest("GET", "/getInstanceId")
         if response and response.StatusCode == 200 then
             local success, data = pcall(HttpService.JSONDecode, HttpService, response.Body)
             if success and data.instanceId then
                 if data.instanceId == game.JobId then
-                    -- In correct instance
-                    pcall(function()
-                        TextChatService.TextChannels.RBXGeneral:SendAsync(CHAT_MESSAGE)
-                    end)
-                    clickAcceptButton()
+                    -- ✅ Instance cocok, lakukan tugas
+                    -- 1. Collect Gift jika cooldown selesai
+                    collectGifts()
+
+                    -- 2. Skip kirim chat jika ada player lain
+                    if isPlayerNearby() then
+                        print("Player detected nearby - skipping chat")
+                    else
+                        pcall(function()
+                            TextChatService.TextChannels.RBXGeneral:SendAsync(CHAT_MESSAGE)
+                        end)
+                        clickAcceptButton()
+                    end
                 else
-                    -- Need to teleport
+                    -- ❌ Instance salah, teleport ke instance yang benar
+                    print("Berada di instance salah, teleporting...")
                     pcall(function()
                         TeleportService:TeleportToPlaceInstance(PLACE_ID, data.instanceId, Players.LocalPlayer)
                     end)
                 end
+            else
+                warn("Gagal parsing data instanceId:", response.Body)
             end
+        else
+            warn("Gagal mendapatkan instanceId dari server")
         end
     end
 end
+
 
 -- Start script with error handling (UNCHANGED)
 local success, err = pcall(main)
