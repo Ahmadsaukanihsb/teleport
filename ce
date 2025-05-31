@@ -1,18 +1,11 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local remote = ReplicatedStorage:FindFirstChild("AcceptPetGift")
 
-if remote and remote:IsA("RemoteEvent") then
-    local originalFireServer = remote.FireServer
-
-    remote.FireServer = function(self, ...)
-        local args = {...}
-        print("🎁 AcceptPetGift dipanggil dengan argumen:")
-        for i, v in pairs(args) do
-            print(i, v)
-        end
-        -- Jalankan aslinya
-        return originalFireServer(self, unpack(args))
-    end
+if remote then
+    remote.OnClientEvent:Connect(function(...)
+        print("🎁 AcceptPetGift menerima event dari server:")
+        print(...)
+    end)
 else
-    warn("❌ AcceptPetGift tidak ditemukan di ReplicatedStorage.")
+    warn("❌ Event AcceptPetGift tidak ditemukan.")
 end
