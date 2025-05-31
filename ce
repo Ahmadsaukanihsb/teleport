@@ -1,40 +1,41 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local HttpService = game:GetService("HttpService")
+local function acceptItemGifts()
+    local player = Players.LocalPlayer
+    if not player then return false end
 
-local possibleRemoteFunctionNames = {
-    "PetService",
-    "PetGiftingService",
-    "GiftService",
-    "GiftRemoteFunction",
-    "InboxService",
-    "GiftData",
-    "GetGift",
-    "GetGifts",
-    "GetInbox"
-}
-
-for _, name in ipairs(possibleRemoteFunctionNames) do
-    local remote = ReplicatedStorage:FindFirstChild(name)
-    if remote and remote:IsA("RemoteFunction") then
-        print("🔍 RemoteFunction ditemukan:", remote.Name)
-        
-        local success, result = pcall(function()
-            return remote:InvokeServer()
-        end)
-
-        if success then
-            print("✅ Hasil dari", remote.Name, ":")
-            if typeof(result) == "table" then
-                print(HttpService:JSONEncode(result))
-            else
-                print(result)
-            end
-        else
-            warn("❌ Gagal InvokeServer pada", remote.Name, "-", result)
-        end
-    elseif remote and remote:IsA("RemoteEvent") then
-        print("ℹ️ RemoteEvent ditemukan (bukan RemoteFunction):", remote.Name)
+    local giftsFolder = player:FindFirstChild("Gifts") or player:FindFirstChild("ReceivedGifts")
+    if not giftsFolder then
+        print("Tidak ada folder Gifts atau ReceivedGifts")
+        return false
     end
-end
 
-print("✅ Selesai mengecek semua kemungkinan RemoteFunction.")
+    for _, gift in ipairs(giftsFolder:GetChildren()) do
+        if gift:IsA("Folder") or gift:IsA("ValueBase") or gift:IsA("Instance") then
+            -- Coba FireServer ke remote gift handler dengan nama gift
+            local giftName = gift.Name
+            local giftAccepted = false
+
+            -- Cek beberapa remote umum yang kamu punya di ReplicatedStorage
+            local remotes = {
+                ReplicatedStorage:FindFirstChild("GiftSystem"),
+                ReplicatedStorage:FindFirstChild("GiftHandler"),
+                ReplicatedStorage:FindFirstChild("AcceptGiftRemote"),
+                ReplicatedStorage:FindFirstChild("GiftAcceptRemote"),
+            }
+
+            for _, remote in ipairs(remotes) do
+                if remote and remote:IsA("RemoteEvent") then
+                    local success, err = pcall(function()
+                        remote:FireServer("accept", giftName)
+                    end)
+                    if success then
+                        print("🎁 Item gift diterima:", giftName, "via", remote.Name)
+                        giftAccepted = true
+                        break
+                    else
+                        warn("Gagal terima gift", giftName, "dari", remote.Name, "Error:", err)
+                    end
+                end
+            end
+
+            -- Jika sudah diterima, bisa hapus/disable gift agar tidak di-accept ulang (opsional)
+            if giftAccepted then
