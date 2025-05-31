@@ -11,8 +11,8 @@ local PLACE_ID = 126884695634066
 local CHECK_INTERVAL = 15
 local INSTANCE_TIMEOUT = 120
 local CHAT_MESSAGE = "dsadadsadas"
-local GIFT_COOLDOWN = 3 -- Seconds between gift checks
-local PLAYER_DETECTION_RADIUS = 5 -- Distance to check for other players
+local GIFT_COOLDOWN = 5 -- Seconds between gift checks
+local PLAYER_DETECTION_RADIUS = 20 -- Distance to check for other players
 
 -- Track last gift collection time
 local lastGiftCheck = 0
@@ -104,56 +104,101 @@ local function clickAcceptButton()
 end
 
 -- NEW FUNCTION: Auto collect gifts
+-- NEW FUNCTION: Auto collect gifts (UPDATED VERSION)
 local function collectGifts()
     if os.time() - lastGiftCheck < GIFT_COOLDOWN then return end
     lastGiftCheck = os.time()
 
     local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
-    if not gui then return false end
+    if not gui then 
+        print("No PlayerGui found")
+        return false 
+    end
 
-    -- Cari semua frame gift dengan pola teks "Gift from @"
+    -- Cari semua kemungkinan gift popup
     for _, screen in ipairs(gui:GetChildren()) do
         if screen:IsA("ScreenGui") and screen.Enabled then
+            -- Cari berdasarkan beberapa pola teks yang mungkin
+            local giftTextPatterns = {
+                "Gift from @",
+                "Sent you a gift",
+                "Present from",
+                "GiftReceived", -- Untuk nama TextLabel
+                "GiftPopup"    -- Untuk nama Frame
+            }
+            
             for _, frame in ipairs(screen:GetDescendants()) do
-                if frame:IsA("TextLabel") and string.find(frame.Text, "Gift from @") then
-                    -- Cari parent frame yang mengandung tombol Accept
-                    local giftFrame = frame:FindFirstAncestorOfClass("Frame")
-                    if giftFrame then
-                        -- Cari tombol Accept secara spesifik
-                        for _, button in ipairs(giftFrame:GetDescendants()) do
-                            if button:IsA("TextButton") and string.match(string.lower(button.Text), "accept") then
-                                print("Found gift accept button:", button:GetFullName())
+                -- Cek TextLabel yang mengandung teks gift
+                if frame:IsA("TextLabel") then
+                    for _, pattern in ipairs(giftTextPatterns) do
+                        if string.find(frame.Text or "", pattern) then
+                            print("Found gift text:", frame.Text)
+                            
+                            -- Cari tombol Accept di parent frame manapun
+                            local parentFrame = frame:FindFirstAncestorWhichIsA("Frame")
+                            if parentFrame then
+                                -- Cari semua tombol yang mungkin
+                                local possibleButtons = {
+                                    "AcceptButton",
+                                    "ClaimBtn",
+                                    "AcceptGift",
+                                    "ButtonAccept",
+                                    "BtnAccept"
+                                }
                                 
-                                -- Method 1: Click event langsung
-                                local clickEvent = button:FindFirstChild("MouseButton1Click")
-                                if clickEvent then
-                                    pcall(clickEvent.Fire, clickEvent)
-                                    print("Clicked via event")
-                                    return true
+                                for _, btnName in ipairs(possibleButtons) do
+                                    local button = parentFrame:FindFirstChild(btnName, true)
+                                    if button and button:IsA("TextButton") then
+                                        print("Found gift button:", button:GetFullName())
+                                        
+                                        -- Method 1: Click event langsung
+                                        local clickEvent = button:FindFirstChild("MouseButton1Click")
+                                        if clickEvent then
+                                            pcall(clickEvent.Fire, clickEvent)
+                                            print("Clicked via event")
+                                            return true
+                                        end
+                                        
+                                        -- Method 2: Virtual click
+                                        local absPos = button.AbsolutePosition
+                                        local absSize = button.AbsoluteSize
+                                        if absSize.X > 0 and absSize.Y > 0 then
+                                            local center = absPos + absSize/2
+                                            pcall(function()
+                                                VirtualInputManager:SendMouseButtonEvent(
+                                                    center.X, center.Y, 0, true, game, 1)
+                                                task.wait(0.1)
+                                                VirtualInputManager:SendMouseButtonEvent(
+                                                    center.X, center.Y, 0, false, game, 1)
+                                            end)
+                                            print("Clicked via virtual input")
+                                            return true
+                                        end
+                                    end
                                 end
                                 
-                                -- Method 2: Virtual click (Delta compatible)
-                                local absPos = button.AbsolutePosition
-                                local absSize = button.AbsoluteSize
-                                if absSize.X > 0 and absSize.Y > 0 then
-                                    local center = absPos + absSize/2
-                                    pcall(function()
-                                        VirtualInputManager:SendMouseButtonEvent(
-                                            center.X, center.Y, 0, true, game, 1)
-                                        task.wait(0.1)
-                                        VirtualInputManager:SendMouseButtonEvent(
-                                            center.X, center.Y, 0, false, game, 1)
-                                    end)
-                                    print("Clicked via virtual input")
-                                    return true
+                                -- Fallback: Cari tombol dengan teks "Accept"
+                                for _, button in ipairs(parentFrame:GetDescendants()) do
+                                    if button:IsA("TextButton") and string.match(string.lower(button.Text or ""), "accept") then
+                                        print("Found accept button by text:", button:GetFullName())
+                                        -- Sama seperti klik di atas
+                                    end
                                 end
                             end
                         end
                     end
                 end
+                
+                -- Cek langsung untuk ImageButton (icon gift)
+                if frame:IsA("ImageButton") and string.match(string.lower(frame.Name or ""), "gift") then
+                    print("Found gift image button:", frame:GetFullName())
+                    -- Implementasi klik sama seperti di atas
+                end
             end
         end
     end
+    
+    print("No gifts found this check")
     return false
 end
 
