@@ -4,7 +4,7 @@ local Players = game:GetService("Players")
 -- ======= CONFIGURATION =======
 local API_ENDPOINT = "https://api-beta-mocha-45.vercel.app/api/setInstanceId"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-local EXTERNAL_SCRIPT = "https://pastebin.com/raw/2smBA34f" -- Script yang akan di-execute
+local EXTERNAL_SCRIPT = "https://pastebin.com/raw/pfpzbXiF" -- Script yang akan di-execute
 -- =============================
 
 -- Dapatkan data player
