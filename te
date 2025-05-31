@@ -4,70 +4,63 @@ local HttpService = game:GetService("HttpService")
 local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
 
--- Delta-compatible configuration
+-- Configuration
 local REDIS_API_URL = "https://api-beta-mocha-45.vercel.app/api"
 local PLACE_ID = 126884695634066
 local CHECK_INTERVAL = 15
-local INSTANCE_TIMEOUT = 120
 local CHAT_MESSAGE = "dsadadsadas"
 
--- Delta-compatible HTTP request function
+-- Delta-optimized HTTP request
 local function makeHttpRequest(method, endpoint, body)
     local requestFunc = http and http.request or http_request or request
-    if not requestFunc then
-        warn("HTTP function not available in Delta")
-        return nil
-    end
-
-    local url = REDIS_API_URL .. endpoint
+    if not requestFunc then return nil end
+    
     local success, response = pcall(function()
         return requestFunc({
-            Url = url,
+            Url = REDIS_API_URL..endpoint,
             Method = method,
-            Headers = {
-                ["Content-Type"] = "application/json"
-            },
+            Headers = {["Content-Type"] = "application/json"},
             Body = body and HttpService:JSONEncode(body) or nil
         })
     end)
-
+    
     return success and response or nil
 end
 
--- Delta-compatible button clicker
+-- Improved button clicker for exact "Accept" button
 local function clickAcceptButton()
     local gui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
     if not gui then return false end
 
-    local targetNames = {"accept", "join", "confirm", "ok"}
-    
+    -- First try to find exact "Accept" text button
     for _, screen in ipairs(gui:GetChildren()) do
         if screen:IsA("ScreenGui") and screen.Enabled then
             for _, descendant in ipairs(screen:GetDescendants()) do
-                if (descendant:IsA("TextButton") or descendant:IsA("ImageButton")) then
-                    local lowerName = string.lower(descendant.Name)
-                    for _, target in ipairs(targetNames) do
-                        if string.find(lowerName, target) then
-                            if descendant.Visible and descendant.Active then
-                                -- Try to fire click event directly first
-                                local clickEvent = descendant:FindFirstChild("MouseButton1Click")
-                                if clickEvent then
-                                    pcall(clickEvent.Fire, clickEvent)
-                                    return true
-                                end
-                                
-                                -- Fallback to mouse simulation
-                                pcall(function()
-                                    local absPos = descendant.AbsolutePosition
-                                    local absSize = descendant.AbsoluteSize
-                                    local center = absPos + absSize/2
-                                    UserInputService:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1)
-                                    task.wait(0.1)
-                                    UserInputService:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
-                                end)
-                                return true
-                            end
+                -- Check for TextButton with exact "Accept" text
+                if descendant:IsA("TextButton") and descendant.Text == "Accept" then
+                    if descendant.Visible and descendant.Active then
+                        -- Try to fire click event directly
+                        local clickEvent = descendant:FindFirstChild("MouseButton1Click")
+                        if clickEvent then
+                            pcall(clickEvent.Fire, clickEvent)
+                            return true
                         end
+                        
+                        -- Fallback to mouse click simulation
+                        pcall(function()
+                            local pos = descendant.AbsolutePosition
+                            local size = descendant.AbsoluteSize
+                            local center = pos + size/2
+                            
+                            -- Double click to ensure registration
+                            for _ = 1, 2 do
+                                UserInputService:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1)
+                                task.wait(0.05)
+                                UserInputService:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
+                                task.wait(0.1)
+                            end
+                        end)
+                        return true
                     end
                 end
             end
@@ -76,7 +69,7 @@ local function clickAcceptButton()
     return false
 end
 
--- Main function with Delta compatibility
+-- Main function with better button handling
 local function main()
     while task.wait(CHECK_INTERVAL) do
         local response = makeHttpRequest("GET", "/getInstanceId")
@@ -86,13 +79,20 @@ local function main()
                 if data.instanceId == game.JobId then
                     -- In correct instance
                     pcall(function()
-                        TextChatService.TextChannels.RBXGeneral:SendAsync(CHAT_MESSAGE)
+                        local channel = TextChatService.TextChannels.RBXGeneral
+                        if channel then channel:SendAsync(CHAT_MESSAGE) end
                     end)
-                    clickAcceptButton()
+                    
+                    -- Enhanced button clicking with retries
+                    for i = 1, 3 do  -- Try 3 times with delays
+                        if clickAcceptButton() then break end
+                        task.wait(0.5)
+                    end
                 else
-                    -- Need to teleport
+                    -- Teleport to new instance
                     pcall(function()
                         TeleportService:TeleportToPlaceInstance(PLACE_ID, data.instanceId, Players.LocalPlayer)
+                        task.wait(10)  -- Wait for teleport
                     end)
                 end
             end
@@ -100,8 +100,11 @@ local function main()
     end
 end
 
--- Start script with error handling
+-- Start with error protection
 local success, err = pcall(main)
 if not success then
     warn("Script error:", err)
+    -- Try to restart after delay
+    task.wait(30)
+    pcall(main)
 end
