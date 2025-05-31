@@ -1,45 +1,42 @@
--- [1] Cari function yang memanggil AcceptPetGift
-local targetFunc = nil
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-for _, f in pairs(getgc(true)) do
-    if typeof(f) == "function" and islclosure(f) then
-        local constants = debug.getconstants(f)
-        for _, c in pairs(constants) do
-            if tostring(c):lower():find("acceptpetgift") then
-                targetFunc = f
-                break
+local player = Players.LocalPlayer
+local AcceptPetGift = ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("AcceptPetGift")
+
+-- Tunggu GUI Gift muncul
+local gui = player:WaitForChild("PlayerGui")
+local found = false
+
+-- Fungsi untuk terima gift otomatis
+local function checkGiftUI(container)
+    for _, frame in ipairs(container:GetChildren()) do
+        if frame:IsA("Frame") or frame:IsA("TextButton") then
+            local petNameLabel = frame:FindFirstChild("PetName") or frame:FindFirstChild("Pet")
+            local senderLabel = frame:FindFirstChild("Sender") or frame:FindFirstChild("From")
+
+            if petNameLabel and senderLabel and petNameLabel:IsA("TextLabel") and senderLabel:IsA("TextLabel") then
+                local petName = petNameLabel.Text
+                local sender = senderLabel.Text
+                print("🎁 Gift ditemukan! Pet:", petName, "| Dari:", sender)
+
+                -- FireServer ke server
+                AcceptPetGift:FireServer(petName, sender)
+                task.wait(0.5)
+                found = true
             end
         end
     end
-    if targetFunc then break end
 end
 
--- [2] Jika ditemukan, tampilkan isi constants dan upvalues
-if targetFunc then
-    print("✅ Function ditemukan: ", targetFunc)
-
-    print("🔍 Constants:")
-    for i, v in ipairs(debug.getconstants(targetFunc)) do
-        print(i, v)
-    end
-
-    print("📦 Upvalues:")
-    for i = 1, debug.getinfo(targetFunc).nups do
-        local name, val = debug.getupvalue(targetFunc, i)
-        print(i, name, val)
-    end
-
-    -- [3] Hook function untuk melihat argumen yang dikirim saat AcceptPetGift dipanggil
-    local oldFunc = targetFunc
-    hookfunction(oldFunc, function(...)
-        local args = {...}
-        print("🎁 AcceptPetGift dipanggil dengan argumen:")
-        for i, v in ipairs(args) do
-            print(i, v)
+-- Cari folder GiftList di GUI (loop aman)
+task.spawn(function()
+    while not found do
+        for _, descendant in ipairs(gui:GetDescendants()) do
+            if descendant:IsA("Frame") and descendant.Name:lower():find("gift") then
+                checkGiftUI(descendant)
+            end
         end
-        return oldFunc(...)
-    end)
-
-else
-    warn("❌ Function AcceptPetGift tidak ditemukan.")
-end
+        task.wait(1)
+    end
+end)
