@@ -9,7 +9,7 @@ local PLACE_ID = 126884695634066
 local CHECK_INTERVAL = 15
 local MAX_CHAT_PER_INSTANCE = 3
 local TELEPORT_COOLDOWN = 30
-local CHAT_MESSAGE = "Halo teman-teman!"
+local CHAT_MESSAGE = "dsadasdsa"
 local MAX_DISTANCE = 20
 
 -- Penyimpanan lokal
