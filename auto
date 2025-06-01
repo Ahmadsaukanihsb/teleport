@@ -52,7 +52,7 @@ local function updateUserInstance()
     local userId = Players.LocalPlayer.UserId
     local instanceId = game.JobId
     local body = { instanceId = instanceId, userId = userId }
-    local res = makeHttpRequest("POST", "/setInstanceUser", body)
+    local res = makeHttpRequest("POST", "/api/setInstanceUser", body)
     if not (res and res.StatusCode == 200) then
         warn("Failed to update user instance")
     end
@@ -65,7 +65,7 @@ local function updateUserPosition()
     if not pos then return end
 
     local body = { instanceId = instanceId, userId = userId, position = pos }
-    local res = makeHttpRequest("POST", "/setUserPosition", body)
+    local res = makeHttpRequest("POST", "/api/setUserPosition", body)
     if not (res and res.StatusCode == 200) then
         warn("Failed to update user position")
     end
@@ -115,7 +115,7 @@ local function main()
                     if instanceChatCounts[game.JobId] >= MAX_CHAT_PER_INSTANCE then
                         print("🚫 Batas chat tercapai untuk instance ini")
                     else
-                        local posResp = makeHttpRequest("GET", "/getUserPositions?instanceId=" .. instanceId)
+                        local posResp = makeHttpRequest("GET", "/api/getUserPositions?instanceId=" .. instanceId)
                         if posResp and posResp.StatusCode == 200 then
                             local successPos, dataUsers = pcall(function()
                                 return HttpService:JSONDecode(posResp.Body)
