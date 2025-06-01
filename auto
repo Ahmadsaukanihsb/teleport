@@ -28,7 +28,10 @@ end
 
 local function makeHttpRequest(method, endpoint, body)
     local url = REDIS_API_URL .. endpoint
-    local headers = { ["Content-Type"] = "application/json" }
+    local headers = {
+        ["Content-Type"] = "application/json",
+        ["ngrok-skip-browser-warning"] = "true" -- Bypass Ngrok's browser warning
+    }
     local requestBody = body and HttpService:JSONEncode(body) or nil
 
     local success, response = pcall(function()
@@ -40,12 +43,22 @@ local function makeHttpRequest(method, endpoint, body)
         })
     end)
 
-    if success then
-        return response
-    else
-        warn("HTTP request failed:", response)
+    if not success then
+        warn("HTTP request failed completely:", response)
         return nil
     end
+
+    -- Debug the raw response
+    print("HTTP Response Status:", response.StatusCode)
+    print("Response Body:", response.Body)
+
+    -- Check if we got HTML instead of JSON
+    if response.Body:match("<!DOCTYPE html>") then
+        warn("Received HTML response instead of JSON - check Ngrok tunnel")
+        return nil
+    end
+
+    return response
 end
 
 local function updateUserInstance()
