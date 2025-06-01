@@ -4,27 +4,19 @@ local HttpService = game:GetService("HttpService")
 local TextChatService = game:GetService("TextChatService")
 
 -- Config
-local REDIS_API_URL = "https://0844-2001-448a-106e-4be8-56bb-76c9-5288-28b1.ngrok-free.app"
+local REDIS_API_URL = "https://54bd-2001-448a-106e-4be8-56bb-76c9-5288-28b1.ngrok-free.app"
 local PLACE_ID = 126884695634066
 local CHECK_INTERVAL = 15
 local MAX_CHAT_PER_INSTANCE = 3
 local TELEPORT_COOLDOWN = 30
 local CHAT_MESSAGE = "Hello from Roblox!"
-local MAX_DISTANCE = 20
+local CHAT_RADIUS = 20 -- radius dalam studs untuk deteksi player lain
 
 -- Local storage
 local instanceChatCounts = {}
 local lastTeleportAttempt = 0
 
--- Helper functions
-local function getLocalPlayerPosition()
-    local character = Players.LocalPlayer.Character
-    if not character then return nil end
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return nil end
-    return { x = rootPart.Position.X, y = rootPart.Position.Y, z = rootPart.Position.Z }
-end
-
+-- Helpers
 local function parseJsonSafely(jsonStr)
     local success, result = pcall(function()
         return HttpService:JSONDecode(jsonStr)
@@ -81,34 +73,25 @@ local function updateUserInstance()
         instanceId = instanceId,
         userId = userId
     })
-    
+
     if not res then
         warn("Failed to update instance")
         return false
     end
-    
+
     local data = parseJsonSafely(res.Body)
     if not data or not data.success then
         warn("Invalid response:", res.Body)
         return false
     end
-    
+
     return true
 end
 
-local function updateUserPosition()
-    local userId = Players.LocalPlayer.UserId
-    local instanceId = game.JobId
-    local pos = getLocalPlayerPosition()
-    if not pos then return false end
-
-    local res = fetchWithRetry("POST", "/api/setUserPosition", {
-        instanceId = instanceId,
-        userId = userId,
-        position = pos
-    })
-    
-    return res and res.StatusCode == 200
+local function isValidInstanceId(instanceId)
+    return instanceId and typeof(instanceId) == "string"
+           and #instanceId > 10
+           and instanceId ~= game.JobId
 end
 
 local function safeTeleport(instanceId)
@@ -116,37 +99,22 @@ local function safeTeleport(instanceId)
         print("Teleport cooldown...")
         return false
     end
-    
+
     lastTeleportAttempt = os.time()
     local success, err = pcall(function()
-        -- Add random access code to force fresh server join
         local accessCode = tostring(math.random(10000, 99999))
         TeleportService:TeleportToPlaceInstance(PLACE_ID, instanceId, Players.LocalPlayer, {
             reservedServerAccessCode = accessCode
         })
     end)
-    
+
     if not success then
         warn("Teleport failed:", err)
         return false
     end
-    
-    task.wait(10) -- Longer wait after teleport
+
+    task.wait(10)
     return true
-end
-
-local function getDistance(pos1, pos2)
-    if not pos1 or not pos2 then return math.huge end
-    local dx = pos1.x - pos2.x
-    local dy = pos1.y - pos2.y
-    local dz = pos1.z - pos2.z
-    return math.sqrt(dx*dx + dy*dy + dz*dz)
-end
-
-local function isValidInstanceId(instanceId)
-    return instanceId and typeof(instanceId) == "string" 
-           and #instanceId > 10 -- Basic length check
-           and instanceId ~= game.JobId
 end
 
 local function handleTeleportLogic(targetInstance)
@@ -154,69 +122,60 @@ local function handleTeleportLogic(targetInstance)
         warn("Invalid target instance:", targetInstance)
         return false
     end
-    
+
     print("🔄 Instance berbeda, teleporting ke", targetInstance)
     if instanceChatCounts[game.JobId] then
         instanceChatCounts[game.JobId] = nil
     end
-    
+
     return safeTeleport(targetInstance)
 end
 
+-- Fungsi tambahan untuk cek player sekitar sebelum chat
+local function isPlayerNearby()
+    local localPlayer = Players.LocalPlayer
+    local character = localPlayer.Character
+    if not character or not character.PrimaryPart then
+        return false
+    end
+    local localPos = character.PrimaryPart.Position
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= localPlayer and player.Character and player.Character.PrimaryPart then
+            local otherPos = player.Character.PrimaryPart.Position
+            local distance = (localPos - otherPos).Magnitude
+            if distance <= CHAT_RADIUS then
+                return true
+            end
+        end
+    end
+    return false
+end
+
 local function handleChatLogic(instanceId, userId)
+    if isPlayerNearby() then
+        print("🚫 Player lain di sekitar, chat dibatalkan")
+        return
+    end
+
     local chatCount = instanceChatCounts[instanceId] or 0
     if chatCount >= MAX_CHAT_PER_INSTANCE then
         print("🚫 Batas chat tercapai untuk instance ini")
         return
     end
 
-    local posRes = fetchWithRetry("GET", "/api/getUserPositions?instanceId="..instanceId, nil, 5)
-    if not posRes or posRes.StatusCode ~= 200 then
-        warn("Gagal mendapatkan posisi user dari server")
-        return
-    end
-
-    local posData = parseJsonSafely(posRes.Body)
-    if not posData or not posData.success or not posData.users then
-        warn("Gagal parsing data posisi user")
-        return
-    end
-
-    local localPos = getLocalPlayerPosition()
-    if not localPos then
-        warn("⚠️ Gagal mendapatkan posisi lokal player")
-        return
-    end
-
-    local shouldChat = false
-    for _, user in ipairs(posData.users) do
-        if user.userId ~= userId and user.position then
-            if getDistance(localPos, user.position) <= MAX_DISTANCE then
-                shouldChat = true
-                break
-            end
-        end
-    end
-
-    if shouldChat then
-        pcall(function()
-            TextChatService.TextChannels.RBXGeneral:SendAsync(CHAT_MESSAGE)
-            instanceChatCounts[instanceId] = chatCount + 1
-            print("💬 Mengirim chat (", instanceChatCounts[instanceId], "/", MAX_CHAT_PER_INSTANCE, ")")
-        end)
-    else
-        print("🛑 Tidak ada user lain dalam radius " .. MAX_DISTANCE)
-    end
+    pcall(function()
+        TextChatService.TextChannels.RBXGeneral:SendAsync(CHAT_MESSAGE)
+        instanceChatCounts[instanceId] = chatCount + 1
+        print("💬 Mengirim chat (", instanceChatCounts[instanceId], "/", MAX_CHAT_PER_INSTANCE, ")")
+    end)
 end
 
 -- Main loop
 local function main()
     while task.wait(CHECK_INTERVAL) do
-        -- Update current status
         if not updateUserInstance() then continue end
-        if not updateUserPosition() then continue end
 
-        -- Get target instance
         local userId = Players.LocalPlayer.UserId
         local res = fetchWithRetry("GET", "/api/getInstanceId?userId="..userId, nil, 5)
         if not res or res.StatusCode ~= 200 then
@@ -230,7 +189,6 @@ local function main()
             continue
         end
 
-        -- Handle instance switching or chat
         if isValidInstanceId(data.instanceId) and data.instanceId ~= game.JobId then
             handleTeleportLogic(data.instanceId)
         else
@@ -239,6 +197,6 @@ local function main()
     end
 end
 
--- Start the system
+-- Start system
 print("✅ Sistem auto-joiner dimulai")
 task.spawn(main)
