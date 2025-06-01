@@ -4,7 +4,7 @@ local HttpService = game:GetService("HttpService")
 local TextChatService = game:GetService("TextChatService")
 
 -- Config
-local REDIS_API_URL = "https://38fa-36-76-129-51.ngrok-free.app/api" -- Sudah pakai /api prefix
+local REDIS_API_URL = "https://3016-2001-448a-106e-4be8-56bb-76c9-5288-28b1.ngrok-free.app/api" -- Sudah pakai /api prefix
 local PLACE_ID = 126884695634066
 local CHECK_INTERVAL = 15
 local MAX_CHAT_PER_INSTANCE = 3
