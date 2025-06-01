@@ -1,167 +1,50 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
-
--- ======= KONFIGURASI =======
-local API_BASE_URL = "https://backend-tau-three-32.vercel.app/api" -- ganti sesuai domain backend kamu
-local WEBHOOK_URL = "https://discord.com/api/webhooks/xxxx/yyyy" -- ganti dengan webhook Discord kamu
-local RETRY_LIMIT = 3
--- ===========================
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
-local currentJobId = game.JobId
-local playerName = player.Name
-local playerUserId = player.UserId
+local BACKEND_URL = "https://backend-tau-three-32.vercel.app/api/instanceUser"
+local RETRY_LIMIT = 5
+local RETRY_DELAY = 3
 
-local function httpRequest(method, url, body, headers)
-    headers = headers or {}
-    headers["Content-Type"] = headers["Content-Type"] or "application/json"
-
-    local attempt = 0
-    while attempt < RETRY_LIMIT do
-        attempt = attempt + 1
+local function postData(data)
+    local jsonData = HttpService:JSONEncode(data)
+    local headers = {["Content-Type"] = "application/json"}
+    for i = 1, RETRY_LIMIT do
         local success, response = pcall(function()
             return HttpService:RequestAsync({
-                Url = url,
-                Method = method,
+                Url = BACKEND_URL,
+                Method = "POST",
                 Headers = headers,
-                Body = body,
+                Body = jsonData
             })
         end)
-        if success and response then
-            if response.StatusCode == 429 then
-                local retryAfter = tonumber(response.Headers["Retry-After"]) or 5
-                warn("[HTTP] Rate limited, retrying after "..retryAfter.." seconds (Attempt "..attempt..")")
-                task.wait(retryAfter)
-            else
-                print(string.format("[HTTP] %s %s (Attempt %d) - Status: %d", method, url, attempt, response.StatusCode))
-                return response
-            end
+        if success and response.StatusCode >= 200 and response.StatusCode < 300 then
+            print("[Logger] Sent data to backend")
+            return true
         else
-            warn("[HTTP] Request attempt "..attempt.." gagal:", response)
-            task.wait(1 + attempt * 2)
+            warn("[Logger] Failed attempt "..i..", retrying...")
+            task.wait(RETRY_DELAY)
         end
     end
-    return nil
+    return false
 end
 
-local function getInventoryContents()
-    local contents = {}
-
-    local function scanContainer(container)
-        for _, item in ipairs(container:GetChildren()) do
-            local assetId = nil
-            if item:GetAttribute("AssetId") then
-                assetId = item:GetAttribute("AssetId")
-            elseif item:FindFirstChild("AssetId") and item.AssetId:IsA("StringValue") then
-                assetId = item.AssetId.Value
-            end
-            table.insert(contents, {
-                Name = item.Name,
-                Class = item.ClassName,
-                AssetId = assetId
-            })
-        end
-    end
-
-    if player:FindFirstChild("Backpack") then
-        scanContainer(player.Backpack)
-    end
-
-    local character = player.Character
-    if character then
-        for _, containerName in ipairs({"Tool", "Weapon", "Accessory"}) do
-            local container = character:FindFirstChild(containerName)
-            if container then
-                scanContainer(container)
-            end
-        end
-    end
-
-    return contents
-end
-
-local function formatInventoryString()
-    local items = getInventoryContents()
-    if #items == 0 then return "Inventory kosong" end
-
-    local grouped = {}
-    for _, item in ipairs(items) do
-        local key = item.Name
-        if item.AssetId then
-            key = key .. " (ID: "..item.AssetId..")"
-        end
-        grouped[key] = (grouped[key] or 0) + 1
-    end
-
-    local parts = {}
-    for name, count in pairs(grouped) do
-        table.insert(parts, string.format("%s ×%d", name, count))
-    end
-
-    return table.concat(parts, "\n")
-end
-
-local function sendDiscordNotification()
-    local embed = {
-        username = "Logger Script",
-        avatar_url = "https://www.roblox.com/headshot-thumbnail/image?userId="..playerUserId.."&width=420&height=420&format=png",
-        embeds = {{
-            title = "🔔 Script Logger Executed",
-            description = string.format("Player **%s** (UserId: %d) menjalankan script\nInstanceId: `%s`", playerName, playerUserId, currentJobId),
-            color = 65280,
-            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-            fields = {
-                {name = "Inventory", value = formatInventoryString(), inline = false},
-                {name = "Game Info", value = string.format("PlaceId: %d\nJobId: %s", game.PlaceId, currentJobId), inline = true},
-            },
-            footer = {text = "Logger Script"}
-        }}
-    }
-
-    local response = httpRequest(
-        "POST",
-        WEBHOOK_URL,
-        HttpService:JSONEncode(embed)
-    )
-
-    return response and response.StatusCode == 204
-end
-
-local function sendToBackend()
-    local payload = {
-        username = playerName,
-        userId = tostring(playerUserId),
-        instanceId = currentJobId,
-        inventory = getInventoryContents(),
+local function sendLogger()
+    local data = {
+        username = player.Name,
+        userId = player.UserId,
+        instanceId = game.JobId,
         timestamp = os.time()
     }
-
-    local response = httpRequest(
-        "POST",
-        API_BASE_URL .. "/setInstanceUser",
-        HttpService:JSONEncode(payload)
-    )
-
-    if response and response.StatusCode == 200 then
-        print("[Backend] Data berhasil dikirim")
-        return true
-    else
-        warn("[Backend] Gagal mengirim data ke backend")
-        return false
-    end
+    return postData(data)
 end
 
-local function main()
-    local successDiscord, successBackend
-    local ok, err = pcall(function()
-        successDiscord = sendDiscordNotification()
-        successBackend = sendToBackend()
+-- Kirim data saat karakter siap
+if player.Character and player.Character.PrimaryPart then
+    sendLogger()
+else
+    player.CharacterAdded:Connect(function()
+        sendLogger()
     end)
-    if not ok then
-        warn("[Logger] Error saat mengirim data: ".. tostring(err))
-    end
-
-    return successDiscord and successBackend
 end
-
-main()
