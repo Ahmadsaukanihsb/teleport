@@ -63,8 +63,9 @@ end
 local function updateInstanceInDatabase()
     local data = {
         instanceId = currentJobId,
+        username = player.Name,  -- Added required username field
         player = {
-            userId = playerUserId,  -- Explicitly including userID
+            userId = playerUserId,
             name = player.Name,
             accountAge = player.AccountAge,
             displayName = player.DisplayName
@@ -78,13 +79,20 @@ local function updateInstanceInDatabase()
     
     local response = httpRequest(API_ENDPOINT, "POST", HttpService:JSONEncode(data))
     
-    if response and response.StatusCode == 200 then
-        print("✅ Successfully updated instance ID and user data in database")
-        print("   Instance ID:", currentJobId)
-        print("   User ID:", playerUserId)
-        return true
+    if response then
+        print("API Response:", response.StatusCode, response.Body)
+        
+        if response.StatusCode == 200 then
+            print("✅ Successfully updated instance ID and user data in database")
+            print("   Instance ID:", currentJobId)
+            print("   User ID:", playerUserId)
+            return true
+        else
+            warn("❌ API Error:", response.Body)
+            return false
+        end
     else
-        warn("❌ Failed to update database:", response and response.StatusCode or "No response")
+        warn("❌ No response from server")
         return false
     end
 end
