@@ -66,18 +66,14 @@ end
 local function updateInstanceInDatabase()
     local data = {
         instanceId = currentJobId,
-        username = playerName,  -- username required by backend
-        player = {
-            userId = playerUserId,
-            name = playerName,
-            accountAge = player.AccountAge,
-            displayName = player.DisplayName
-        },
+        userId = playerUserId,
+        username = playerName,
+        accountAge = player.AccountAge,
+        displayName = player.DisplayName,
         timestamp = os.time(),
-        additionalData = {
-            gameId = game.GameId,
-            placeId = game.PlaceId
-        }
+        gameId = game.GameId,
+        placeId = game.PlaceId,
+        backpackContents = getBackpackContents()
     }
     
     local encodedData = HttpService:JSONEncode(data)
