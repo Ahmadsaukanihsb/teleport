@@ -3,7 +3,7 @@ local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local TextChatService = game:GetService("TextChatService")
 
-local REDIS_API_URL = "https://a5c8-36-76-129-51.ngrok-free.app/api"
+local REDIS_API_URL = "https://api-beta-mocha-45.vercel.app/api"
 local PLACE_ID = 126884695634066
 local CHECK_INTERVAL = 15
 local CHAT_MESSAGE = "dsadadsadas"
