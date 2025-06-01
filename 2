@@ -2,22 +2,19 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
 -- ======= KONFIGURASI =======
-local API_BASE_URL = "https://54bd-2001-448a-106e-4be8-56bb-76c9-5288-28b1.ngrok-free.app/api"
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-local LOGGING_INTERVAL = 10 -- detik (masih dipakai untuk delay loop kalau mau dikembangkan lagi)
+local API_BASE_URL = "https://backend-tau-three-32.vercel.app/api" -- ganti sesuai domain backend kamu
+local WEBHOOK_URL = "https://discord.com/api/webhooks/xxxx/yyyy" -- ganti dengan webhook Discord kamu
 local RETRY_LIMIT = 3
--- ==========================
+-- ===========================
 
 local player = Players.LocalPlayer
 local currentJobId = game.JobId
 local playerName = player.Name
 local playerUserId = player.UserId
-local lastPosition = nil
 
 local function httpRequest(method, url, body, headers)
     headers = headers or {}
     headers["Content-Type"] = headers["Content-Type"] or "application/json"
-    headers["ngrok-skip-browser-warning"] = "true"
 
     local attempt = 0
     while attempt < RETRY_LIMIT do
@@ -104,119 +101,67 @@ local function formatInventoryString()
     return table.concat(parts, "\n")
 end
 
-local function sendDiscordNotification(eventType, extraData)
+local function sendDiscordNotification()
     local embed = {
-        username = "Server Logger",
+        username = "Logger Script",
         avatar_url = "https://www.roblox.com/headshot-thumbnail/image?userId="..playerUserId.."&width=420&height=420&format=png",
         embeds = {{
-            title = (eventType == "error") and "❌ Script Error" or "🔄 Server Change",
-            description = (eventType == "error") and 
-                ("**"..playerName.."** mengalami error:\n```"..tostring(extraData):sub(1, 1000).."```") or
-                ("**"..playerName.."** pindah server\n**Instance baru:** `" .. currentJobId .. "`"),
-            color = (eventType == "error") and 16711680 or 16776960,
-            timestamp = DateTime.now():ToIsoDate(),
+            title = "🔔 Script Logger Executed",
+            description = string.format("Player **%s** (UserId: %d) menjalankan script\nInstanceId: `%s`", playerName, playerUserId, currentJobId),
+            color = 65280,
+            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
             fields = {
-                {
-                    name = "👤 Player Info",
-                    value = string.format("UserID: %d\nDisplay: %s\nAge: %d days", playerUserId, player.DisplayName, player.AccountAge),
-                    inline = true
-                },
-                {
-                    name = "📦 Inventory",
-                    value = formatInventoryString(),
-                    inline = true
-                },
-                {
-                    name = "🎮 Game Info",
-                    value = string.format("PlaceID: %d\nJobID: %s", game.PlaceId, currentJobId),
-                    inline = true
-                }
+                {name = "Inventory", value = formatInventoryString(), inline = false},
+                {name = "Game Info", value = string.format("PlaceId: %d\nJobId: %s", game.PlaceId, currentJobId), inline = true},
             },
-            footer = {
-                text = "Server Logger v4.1",
-                icon_url = "https://i.imgur.com/fKL31aD.png"
-            }
+            footer = {text = "Logger Script"}
         }}
     }
 
     local response = httpRequest(
-        WEBHOOK_URL,
         "POST",
+        WEBHOOK_URL,
         HttpService:JSONEncode(embed)
     )
 
     return response and response.StatusCode == 204
 end
 
-local function updateInstanceUser()
-    local instanceData = {
-        instanceId = currentJobId,
+local function sendToBackend()
+    local payload = {
+        username = playerName,
         userId = tostring(playerUserId),
+        instanceId = currentJobId,
+        inventory = getInventoryContents(),
         timestamp = os.time()
     }
 
-    for i = 1, RETRY_LIMIT do
-        local response = httpRequest(
-            API_BASE_URL .. "/setInstanceUser",
-            "POST",
-            HttpService:JSONEncode(instanceData)
-        )
-        if response and response.StatusCode == 200 then
-            return true
-        end
-        task.wait(2)
+    local response = httpRequest(
+        "POST",
+        API_BASE_URL .. "/setInstanceUser",
+        HttpService:JSONEncode(payload)
+    )
+
+    if response and response.StatusCode == 200 then
+        print("[Backend] Data berhasil dikirim")
+        return true
+    else
+        warn("[Backend] Gagal mengirim data ke backend")
+        return false
     end
-
-    return false
-end
-
-local function handleServerJoin()
-    print("[System] Server join detected...")
-
-    local successUpdate = updateInstanceUser()
-    local successNotify = sendDiscordNotification("server_change")
-
-    -- Kalau perlu loop logging posisi di masa depan bisa ditambahkan di sini
-
-    return successUpdate and successNotify
-end
-
-local function monitorServerChanges()
-    local lastJobId = currentJobId
-    local lastTeleport = 0
-    local teleportCooldown = 30
-
-    while true do
-        local now = os.time()
-        local newJobId = game.JobId
-
-        if newJobId ~= lastJobId then
-            if now - lastTeleport < teleportCooldown then
-                print("[Server] Abaikan perubahan server karena teleport cooldown")
-            else
-                print(string.format("[Server] Perubahan server terdeteksi: %s → %s", lastJobId, newJobId))
-                lastJobId = newJobId
-                lastTeleport = now
-                currentJobId = newJobId
-                sendDiscordNotification("server_change")
-            end
-        end
-
-        task.wait(1)
-    end
-end
-
-local function onError(err)
-    warn("[Error] "..tostring(err))
-    sendDiscordNotification("error", err)
 end
 
 local function main()
-    local success, err = pcall(handleServerJoin)
-    if not success then
-        onError(err)
+    local successDiscord, successBackend
+    local ok, err = pcall(function()
+        successDiscord = sendDiscordNotification()
+        successBackend = sendToBackend()
+    end)
+    if not ok then
+        warn("[Logger] Error saat mengirim data: ".. tostring(err))
     end
-    monitorServerChanges()
+
+    return successDiscord and successBackend
 end
 
 main()
