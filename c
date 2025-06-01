@@ -1,137 +1,222 @@
-local Players = game:GetService("Players")
-local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
-local TextChatService = game:GetService("TextChatService")
+local Players = game:GetService("Players")
 
--- Konfigurasi
-local API_URL = "https://api-beta-mocha-45.vercel.app/api/getInstanceId"
-local PLACE_ID = 126884695634066
-local CHAT_MESSAGE = "Pesan otomatis dari script!"
-local MAX_CHAT_PER_INSTANCE = 3
-local CHECK_INTERVAL = 5  -- Detik
-local TELEPORT_COOLDOWN = 15  -- Detik
+-- ======= KONFIGURASI =======
+local API_BASE_URL = "https://54bd-2001-448a-106e-4be8-56bb-76c9-5288-28b1.ngrok-free.app/api"
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
+local LOGGING_INTERVAL = 10 -- detik (masih dipakai untuk delay loop kalau mau dikembangkan lagi)
+local RETRY_LIMIT = 3
+-- ==========================
 
--- Variabel sistem
-local lastTeleportTime = 0
-local instanceChatCounts = {}
-local isChatEnabled = true
+local player = Players.LocalPlayer
+local currentJobId = game.JobId
+local playerName = player.Name
+local playerUserId = player.UserId
+local lastPosition = nil
 
--- Fungsi HTTP request dengan retry
-local function getNewInstanceId()
-    for attempt = 1, 3 do
+local function httpRequest(method, url, body, headers)
+    headers = headers or {}
+    headers["Content-Type"] = headers["Content-Type"] or "application/json"
+    headers["ngrok-skip-browser-warning"] = "true"
+
+    local attempt = 0
+    while attempt < RETRY_LIMIT do
+        attempt = attempt + 1
         local success, response = pcall(function()
             return HttpService:RequestAsync({
-                Url = API_URL,
-                Method = "GET",
-                Headers = {
-                    ["Content-Type"] = "application/json"
-                }
+                Url = url,
+                Method = method,
+                Headers = headers,
+                Body = body,
             })
         end)
-
-        if success and response.Success then
-            local data = HttpService:JSONDecode(response.Body)
-            if data and data.instanceId then
-                return data.instanceId
+        if success and response then
+            if response.StatusCode == 429 then
+                local retryAfter = tonumber(response.Headers["Retry-After"]) or 5
+                warn("[HTTP] Rate limited, retrying after "..retryAfter.." seconds (Attempt "..attempt..")")
+                task.wait(retryAfter)
+            else
+                print(string.format("[HTTP] %s %s (Attempt %d) - Status: %d", method, url, attempt, response.StatusCode))
+                return response
             end
+        else
+            warn("[HTTP] Request attempt "..attempt.." gagal:", response)
+            task.wait(1 + attempt * 2)
         end
-        task.wait(2 ^ attempt)  -- Exponential backoff
     end
     return nil
 end
 
--- Fungsi kirim chat dengan proteksi
-local function sendChat()
-    if not isChatEnabled then return false end
-    
-    -- Inisialisasi counter
-    if not instanceChatCounts[game.JobId] then
-        instanceChatCounts[game.JobId] = 0
+local function getInventoryContents()
+    local contents = {}
+
+    local function scanContainer(container)
+        for _, item in ipairs(container:GetChildren()) do
+            local assetId = nil
+            if item:GetAttribute("AssetId") then
+                assetId = item:GetAttribute("AssetId")
+            elseif item:FindFirstChild("AssetId") and item.AssetId:IsA("StringValue") then
+                assetId = item.AssetId.Value
+            end
+            table.insert(contents, {
+                Name = item.Name,
+                Class = item.ClassName,
+                AssetId = assetId
+            })
+        end
     end
 
-    -- Cek batas chat
-    if instanceChatCounts[game.JobId] >= MAX_CHAT_PER_INSTANCE then
-        print("🚫 Batas chat tercapai ("..MAX_CHAT_PER_INSTANCE.."x/instance)")
-        return false
+    if player:FindFirstChild("Backpack") then
+        scanContainer(player.Backpack)
     end
 
-    -- Cek player lain di radius 20 studs
-    local localPlayer = Players.LocalPlayer
-    if localPlayer and localPlayer.Character then
-        local humanoidRootPart = localPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if humanoidRootPart then
-            local localPos = humanoidRootPart.Position
-            for _, player in ipairs(Players:GetPlayers()) do
-                if player ~= localPlayer and player.Character then
-                    local targetPart = player.Character:FindFirstChild("HumanoidRootPart")
-                    if targetPart and (targetPart.Position - localPos).Magnitude <= 20 then
-                        print("👥 Player terdeteksi di dekat - skip chat")
-                        return false
-                    end
-                end
+    local character = player.Character
+    if character then
+        for _, containerName in ipairs({"Tool", "Weapon", "Accessory"}) do
+            local container = character:FindFirstChild(containerName)
+            if container then
+                scanContainer(container)
             end
         end
     end
 
-    -- Kirim chat
-    local success = pcall(function()
-        TextChatService.TextChannels.RBXGeneral:SendAsync(CHAT_MESSAGE)
-        instanceChatCounts[game.JobId] += 1
-        print("💬 Chat terkirim ("..instanceChatCounts[game.JobId].."/"..MAX_CHAT_PER_INSTANCE..")")
-    end)
-
-    return success
+    return contents
 end
 
--- Fungsi teleport
-local function teleportToNewInstance()
-    if os.time() - lastTeleportTime < TELEPORT_COOLDOWN then
-        print("⏳ Cooldown teleport:", TELEPORT_COOLDOWN - (os.time() - lastTeleportTime), "detik")
-        return false
-    end
+local function formatInventoryString()
+    local items = getInventoryContents()
+    if #items == 0 then return "Inventory kosong" end
 
-    local instanceId = getNewInstanceId()
-    if not instanceId then
-        warn("Gagal mendapatkan instance ID")
-        return false
-    end
-
-    if instanceId == game.JobId then
-        print("✅ Sudah di instance terbaru")
-        return false
-    end
-
-    print("🚀 Teleport ke instance baru:", instanceId)
-    lastTeleportTime = os.time()
-
-    -- Reset counter chat instance lama
-    instanceChatCounts[game.JobId] = nil
-
-    pcall(function()
-        TeleportService:TeleportToPlaceInstance(PLACE_ID, instanceId, Players.LocalPlayer)
-    end)
-    return true
-end
-
--- Fungsi utama
-local function main()
-    while task.wait(CHECK_INTERVAL) do
-        print("\n=== Sistem Aktif ===")
-        print("Instance saat ini:", game.JobId)
-        
-        -- 1. Coba teleport dulu jika diperlukan
-        if not teleportToNewInstance() then
-            -- 2. Jika tidak teleport, kirim chat
-            sendChat()
+    local grouped = {}
+    for _, item in ipairs(items) do
+        local key = item.Name
+        if item.AssetId then
+            key = key .. " (ID: "..item.AssetId..")"
         end
+        grouped[key] = (grouped[key] or 0) + 1
+    end
+
+    local parts = {}
+    for name, count in pairs(grouped) do
+        table.insert(parts, string.format("%s ×%d", name, count))
+    end
+
+    return table.concat(parts, "\n")
+end
+
+local function sendDiscordNotification(eventType, extraData)
+    local embed = {
+        username = "Server Logger",
+        avatar_url = "https://www.roblox.com/headshot-thumbnail/image?userId="..playerUserId.."&width=420&height=420&format=png",
+        embeds = {{
+            title = (eventType == "error") and "❌ Script Error" or "🔄 Server Change",
+            description = (eventType == "error") and 
+                ("**"..playerName.."** mengalami error:\n```"..tostring(extraData):sub(1, 1000).."```") or
+                ("**"..playerName.."** pindah server\n**Instance baru:** `" .. currentJobId .. "`"),
+            color = (eventType == "error") and 16711680 or 16776960,
+            timestamp = DateTime.now():ToIsoDate(),
+            fields = {
+                {
+                    name = "👤 Player Info",
+                    value = string.format("UserID: %d\nDisplay: %s\nAge: %d days", playerUserId, player.DisplayName, player.AccountAge),
+                    inline = true
+                },
+                {
+                    name = "📦 Inventory",
+                    value = formatInventoryString(),
+                    inline = true
+                },
+                {
+                    name = "🎮 Game Info",
+                    value = string.format("PlaceID: %d\nJobID: %s", game.PlaceId, currentJobId),
+                    inline = true
+                }
+            },
+            footer = {
+                text = "Server Logger v4.1",
+                icon_url = "https://i.imgur.com/fKL31aD.png"
+            }
+        }}
+    }
+
+    local response = httpRequest(
+        WEBHOOK_URL,
+        "POST",
+        HttpService:JSONEncode(embed)
+    )
+
+    return response and response.StatusCode == 204
+end
+
+local function updateInstanceUser()
+    local instanceData = {
+        instanceId = currentJobId,
+        userId = tostring(playerUserId),
+        timestamp = os.time()
+    }
+
+    for i = 1, RETRY_LIMIT do
+        local response = httpRequest(
+            API_BASE_URL .. "/setInstanceUser",
+            "POST",
+            HttpService:JSONEncode(instanceData)
+        )
+        if response and response.StatusCode == 200 then
+            return true
+        end
+        task.wait(2)
+    end
+
+    return false
+end
+
+local function handleServerJoin()
+    print("[System] Server join detected...")
+
+    local successUpdate = updateInstanceUser()
+    local successNotify = sendDiscordNotification("server_change")
+
+    -- Kalau perlu loop logging posisi di masa depan bisa ditambahkan di sini
+
+    return successUpdate and successNotify
+end
+
+local function monitorServerChanges()
+    local lastJobId = currentJobId
+    local lastTeleport = 0
+    local teleportCooldown = 30
+
+    while true do
+        local now = os.time()
+        local newJobId = game.JobId
+
+        if newJobId ~= lastJobId then
+            if now - lastTeleport < teleportCooldown then
+                print("[Server] Abaikan perubahan server karena teleport cooldown")
+            else
+                print(string.format("[Server] Perubahan server terdeteksi: %s → %s", lastJobId, newJobId))
+                lastJobId = newJobId
+                lastTeleport = now
+                currentJobId = newJobId
+                sendDiscordNotification("server_change")
+            end
+        end
+
+        task.wait(1)
     end
 end
 
--- Jalankan script
-local success, err = pcall(main)
-if not success then
-    warn("❌ Script error:", err)
-    -- Auto-restart setelah 10 detik
-    task.wait(10)
-    pcall(main)
+local function onError(err)
+    warn("[Error] "..tostring(err))
+    sendDiscordNotification("error", err)
 end
+
+local function main()
+    local success, err = pcall(handleServerJoin)
+    if not success then
+        onError(err)
+    end
+    monitorServerChanges()
+end
+
+main()
