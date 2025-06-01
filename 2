@@ -1,6 +1,5 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local BACKEND_URL = "https://backend-tau-three-32.vercel.app/api/instanceUser"
@@ -23,7 +22,7 @@ local function postData(data)
             print("[Logger] Sent data to backend")
             return true
         else
-            warn("[Logger] Failed attempt "..i..", retrying...")
+            warn("[Logger] Failed attempt " .. i .. ", retrying...")
             task.wait(RETRY_DELAY)
         end
     end
@@ -40,8 +39,8 @@ local function sendLogger()
     return postData(data)
 end
 
--- Kirim data saat karakter siap
-if player.Character and player.Character.PrimaryPart then
+-- Trigger logger saat karakter sudah siap
+if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
     sendLogger()
 else
     player.CharacterAdded:Connect(function()
