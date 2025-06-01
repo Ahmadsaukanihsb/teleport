@@ -1,222 +1,94 @@
 local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
 local Players = game:GetService("Players")
-
--- ======= KONFIGURASI =======
-local API_BASE_URL = "https://54bd-2001-448a-106e-4be8-56bb-76c9-5288-28b1.ngrok-free.app/api"
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-local LOGGING_INTERVAL = 10 -- detik (masih dipakai untuk delay loop kalau mau dikembangkan lagi)
-local RETRY_LIMIT = 3
--- ==========================
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
-local currentJobId = game.JobId
-local playerName = player.Name
-local playerUserId = player.UserId
-local lastPosition = nil
+local BACKEND_LATEST_INSTANCE_URL = "https://backend-tau-three-32.vercel.app/api/latestInstance"
+local BACKEND_INSTANCE_USERS_URL = "https://backend-tau-three-32.vercel.app/api/instanceUsers"
+local TELEPORT_COOLDOWN = 30
+local CHAT_DISTANCE_THRESHOLD = 20
 
-local function httpRequest(method, url, body, headers)
-    headers = headers or {}
-    headers["Content-Type"] = headers["Content-Type"] or "application/json"
-    headers["ngrok-skip-browser-warning"] = "true"
+local lastTeleportTime = 0
+local latestInstanceId = nil
 
-    local attempt = 0
-    while attempt < RETRY_LIMIT do
-        attempt = attempt + 1
-        local success, response = pcall(function()
-            return HttpService:RequestAsync({
-                Url = url,
-                Method = method,
-                Headers = headers,
-                Body = body,
-            })
-        end)
-        if success and response then
-            if response.StatusCode == 429 then
-                local retryAfter = tonumber(response.Headers["Retry-After"]) or 5
-                warn("[HTTP] Rate limited, retrying after "..retryAfter.." seconds (Attempt "..attempt..")")
-                task.wait(retryAfter)
-            else
-                print(string.format("[HTTP] %s %s (Attempt %d) - Status: %d", method, url, attempt, response.StatusCode))
-                return response
-            end
-        else
-            warn("[HTTP] Request attempt "..attempt.." gagal:", response)
-            task.wait(1 + attempt * 2)
-        end
+local function getLatestInstance()
+    local success, response = pcall(function()
+        return HttpService:GetAsync(BACKEND_LATEST_INSTANCE_URL)
+    end)
+    if success then
+        local data = HttpService:JSONDecode(response)
+        return data.instanceId
+    else
+        warn("[AutoJoiner] Failed to get latest instance")
+        return nil
     end
-    return nil
 end
 
-local function getInventoryContents()
-    local contents = {}
-
-    local function scanContainer(container)
-        for _, item in ipairs(container:GetChildren()) do
-            local assetId = nil
-            if item:GetAttribute("AssetId") then
-                assetId = item:GetAttribute("AssetId")
-            elseif item:FindFirstChild("AssetId") and item.AssetId:IsA("StringValue") then
-                assetId = item.AssetId.Value
-            end
-            table.insert(contents, {
-                Name = item.Name,
-                Class = item.ClassName,
-                AssetId = assetId
-            })
-        end
+local function teleportTo(instanceId)
+    local now = os.time()
+    if instanceId and instanceId ~= game.JobId and now - lastTeleportTime > TELEPORT_COOLDOWN then
+        lastTeleportTime = now
+        print("[AutoJoiner] Teleporting to instance:", instanceId)
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, instanceId, player)
+        return true
     end
-
-    if player:FindFirstChild("Backpack") then
-        scanContainer(player.Backpack)
-    end
-
-    local character = player.Character
-    if character then
-        for _, containerName in ipairs({"Tool", "Weapon", "Accessory"}) do
-            local container = character:FindFirstChild(containerName)
-            if container then
-                scanContainer(container)
-            end
-        end
-    end
-
-    return contents
-end
-
-local function formatInventoryString()
-    local items = getInventoryContents()
-    if #items == 0 then return "Inventory kosong" end
-
-    local grouped = {}
-    for _, item in ipairs(items) do
-        local key = item.Name
-        if item.AssetId then
-            key = key .. " (ID: "..item.AssetId..")"
-        end
-        grouped[key] = (grouped[key] or 0) + 1
-    end
-
-    local parts = {}
-    for name, count in pairs(grouped) do
-        table.insert(parts, string.format("%s ×%d", name, count))
-    end
-
-    return table.concat(parts, "\n")
-end
-
-local function sendDiscordNotification(eventType, extraData)
-    local embed = {
-        username = "Server Logger",
-        avatar_url = "https://www.roblox.com/headshot-thumbnail/image?userId="..playerUserId.."&width=420&height=420&format=png",
-        embeds = {{
-            title = (eventType == "error") and "❌ Script Error" or "🔄 Server Change",
-            description = (eventType == "error") and 
-                ("**"..playerName.."** mengalami error:\n```"..tostring(extraData):sub(1, 1000).."```") or
-                ("**"..playerName.."** pindah server\n**Instance baru:** `" .. currentJobId .. "`"),
-            color = (eventType == "error") and 16711680 or 16776960,
-            timestamp = DateTime.now():ToIsoDate(),
-            fields = {
-                {
-                    name = "👤 Player Info",
-                    value = string.format("UserID: %d\nDisplay: %s\nAge: %d days", playerUserId, player.DisplayName, player.AccountAge),
-                    inline = true
-                },
-                {
-                    name = "📦 Inventory",
-                    value = formatInventoryString(),
-                    inline = true
-                },
-                {
-                    name = "🎮 Game Info",
-                    value = string.format("PlaceID: %d\nJobID: %s", game.PlaceId, currentJobId),
-                    inline = true
-                }
-            },
-            footer = {
-                text = "Server Logger v4.1",
-                icon_url = "https://i.imgur.com/fKL31aD.png"
-            }
-        }}
-    }
-
-    local response = httpRequest(
-        WEBHOOK_URL,
-        "POST",
-        HttpService:JSONEncode(embed)
-    )
-
-    return response and response.StatusCode == 204
-end
-
-local function updateInstanceUser()
-    local instanceData = {
-        instanceId = currentJobId,
-        userId = tostring(playerUserId),
-        timestamp = os.time()
-    }
-
-    for i = 1, RETRY_LIMIT do
-        local response = httpRequest(
-            API_BASE_URL .. "/setInstanceUser",
-            "POST",
-            HttpService:JSONEncode(instanceData)
-        )
-        if response and response.StatusCode == 200 then
-            return true
-        end
-        task.wait(2)
-    end
-
     return false
 end
 
-local function handleServerJoin()
-    print("[System] Server join detected...")
-
-    local successUpdate = updateInstanceUser()
-    local successNotify = sendDiscordNotification("server_change")
-
-    -- Kalau perlu loop logging posisi di masa depan bisa ditambahkan di sini
-
-    return successUpdate and successNotify
+local function getUsersInInstance(instanceId)
+    local url = BACKEND_INSTANCE_USERS_URL .. "?instanceId=" .. instanceId
+    local success, response = pcall(function()
+        return HttpService:GetAsync(url)
+    end)
+    if success then
+        local data = HttpService:JSONDecode(response)
+        return data.users or {}
+    else
+        warn("[AutoJoiner] Failed to get users in instance")
+        return {}
+    end
 end
 
-local function monitorServerChanges()
-    local lastJobId = currentJobId
-    local lastTeleport = 0
-    local teleportCooldown = 30
+local function distanceBetweenPlayers(p1, p2)
+    if p1.Character and p2.Character and p1.Character.PrimaryPart and p2.Character.PrimaryPart then
+        return (p1.Character.PrimaryPart.Position - p2.Character.PrimaryPart.Position).Magnitude
+    end
+    return math.huge
+end
 
-    while true do
-        local now = os.time()
-        local newJobId = game.JobId
+local function chatIfClose(userAName)
+    local userAPlayer = Players:FindFirstChild(userAName)
+    if not userAPlayer then
+        print("[AutoJoiner] User A not found in server")
+        return
+    end
 
-        if newJobId ~= lastJobId then
-            if now - lastTeleport < teleportCooldown then
-                print("[Server] Abaikan perubahan server karena teleport cooldown")
-            else
-                print(string.format("[Server] Perubahan server terdeteksi: %s → %s", lastJobId, newJobId))
-                lastJobId = newJobId
-                lastTeleport = now
-                currentJobId = newJobId
-                sendDiscordNotification("server_change")
+    local dist = distanceBetweenPlayers(player, userAPlayer)
+    if dist <= CHAT_DISTANCE_THRESHOLD then
+        player:Chat("Hello "..userAName.."! We're close, distance: "..math.floor(dist))
+    else
+        print("[AutoJoiner] Too far to chat:", dist)
+    end
+end
+
+-- Main loop
+while true do
+    latestInstanceId = getLatestInstance()
+
+    if latestInstanceId and latestInstanceId ~= game.JobId then
+        if teleportTo(latestInstanceId) then
+            break -- teleport executed, break loop
+        end
+    else
+        -- Sudah di instance terbaru, cek apakah user A ada
+        local users = getUsersInInstance(game.JobId)
+        for _, userData in ipairs(users) do
+            if userData.username == "UserA" then -- Ganti sesuai username user A
+                chatIfClose("UserA")
             end
         end
-
-        task.wait(1)
     end
-end
 
-local function onError(err)
-    warn("[Error] "..tostring(err))
-    sendDiscordNotification("error", err)
+    task.wait(5)
 end
-
-local function main()
-    local success, err = pcall(handleServerJoin)
-    if not success then
-        onError(err)
-    end
-    monitorServerChanges()
-end
-
-main()
