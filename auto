@@ -66,27 +66,10 @@ local function fetchWithRetry(method, endpoint, body, maxRetries)
     return nil
 end
 
-local function updateUserInstance()
-    local userId = Players.LocalPlayer.UserId
-    local instanceId = game.JobId
-    local res = fetchWithRetry("POST", "/api/setInstanceUser", {
-        instanceId = instanceId,
-        userId = userId
-    })
-
-    if not res then
-        warn("Failed to update instance")
-        return false
-    end
-
-    local data = parseJsonSafely(res.Body)
-    if not data or not data.success then
-        warn("Invalid response:", res.Body)
-        return false
-    end
-
-    return true
-end
+-- Fungsi ini sudah tidak dipakai, jadi dihapus atau dikomentari
+-- local function updateUserInstance()
+--     -- Tidak mengirim instance ke server
+-- end
 
 local function isValidInstanceId(instanceId)
     return instanceId and typeof(instanceId) == "string"
@@ -174,7 +157,8 @@ end
 -- Main loop
 local function main()
     while task.wait(CHECK_INTERVAL) do
-        if not updateUserInstance() then continue end
+        -- Tidak lagi mengirim instance ke server, jadi hapus updateUserInstance
+        -- if not updateUserInstance() then continue end
 
         local userId = Players.LocalPlayer.UserId
         local res = fetchWithRetry("GET", "/api/getInstanceId?userId="..userId, nil, 5)
