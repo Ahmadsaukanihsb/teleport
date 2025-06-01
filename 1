@@ -2,9 +2,9 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
 -- ======= KONFIGURASI =======
-local API_BASE_URL = "https://54bd-2001-448a-106e-4be8-56bb-76c9-5288-28b1.ngrok-free.app/api"
+local API_BASE_URL = "https://backend-tau-three-32.vercel.app/api" -- Ganti sesuai backend kamu
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-local LOGGING_INTERVAL = 10 -- detik (masih dipakai untuk delay loop kalau mau dikembangkan lagi)
+local LOGGING_INTERVAL = 10 -- detik (masih bisa dikembangkan)
 local RETRY_LIMIT = 3
 -- ==========================
 
@@ -14,10 +14,11 @@ local playerName = player.Name
 local playerUserId = player.UserId
 local lastPosition = nil
 
-local function httpRequest(method, url, body, headers)
+local function httpRequest(url, method, body, headers)
     headers = headers or {}
     headers["Content-Type"] = headers["Content-Type"] or "application/json"
-    headers["ngrok-skip-browser-warning"] = "true"
+    -- hapus header ngrok kalau tidak pakai ngrok
+    -- headers["ngrok-skip-browser-warning"] = "true"
 
     local attempt = 0
     while attempt < RETRY_LIMIT do
@@ -53,7 +54,7 @@ local function getInventoryContents()
     local function scanContainer(container)
         for _, item in ipairs(container:GetChildren()) do
             local assetId = nil
-            if item:GetAttribute("AssetId") then
+            if item:GetAttribute and item:GetAttribute("AssetId") then
                 assetId = item:GetAttribute("AssetId")
             elseif item:FindFirstChild("AssetId") and item.AssetId:IsA("StringValue") then
                 assetId = item.AssetId.Value
@@ -139,12 +140,7 @@ local function sendDiscordNotification(eventType, extraData)
         }}
     }
 
-    local response = httpRequest(
-        WEBHOOK_URL,
-        "POST",
-        HttpService:JSONEncode(embed)
-    )
-
+    local response = httpRequest(WEBHOOK_URL, "POST", HttpService:JSONEncode(embed))
     return response and response.StatusCode == 204
 end
 
@@ -156,11 +152,7 @@ local function updateInstanceUser()
     }
 
     for i = 1, RETRY_LIMIT do
-        local response = httpRequest(
-            API_BASE_URL .. "/setInstanceUser",
-            "POST",
-            HttpService:JSONEncode(instanceData)
-        )
+        local response = httpRequest(API_BASE_URL .. "/setInstanceUser", "POST", HttpService:JSONEncode(instanceData))
         if response and response.StatusCode == 200 then
             return true
         end
@@ -176,7 +168,7 @@ local function handleServerJoin()
     local successUpdate = updateInstanceUser()
     local successNotify = sendDiscordNotification("server_change")
 
-    -- Kalau perlu loop logging posisi di masa depan bisa ditambahkan di sini
+    -- Kalau mau dikembangkan untuk log posisi player, bisa ditambahkan disini
 
     return successUpdate and successNotify
 end
