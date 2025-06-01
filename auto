@@ -4,12 +4,13 @@ local HttpService = game:GetService("HttpService")
 local TextChatService = game:GetService("TextChatService")
 
 -- Config
-local REDIS_API_URL = " https://38fa-36-76-129-51.ngrok-free.app/api"
+local REDIS_API_URL = "https://38fa-36-76-129-51.ngrok-free.app/api"
 local PLACE_ID = 126884695634066
 local CHECK_INTERVAL = 15
 local MAX_CHAT_PER_INSTANCE = 3
 local TELEPORT_COOLDOWN = 30
 local CHAT_MESSAGE = "Halo teman-teman!"
+local MAX_DISTANCE = 20 -- Maks jarak radius
 
 -- Penyimpanan lokal untuk tracking chat dan teleport cooldown
 local instanceChatCounts = {}
@@ -53,7 +54,25 @@ local function safeTeleport(instanceId)
     return true
 end
 
--- Cek apakah ada userId lain di server yang sama dengan kita
+-- Menghitung jarak Euclidean 3D
+local function getDistance(pos1, pos2)
+    local dx = pos1.x - pos2.x
+    local dy = pos1.y - pos2.y
+    local dz = pos1.z - pos2.z
+    return math.sqrt(dx*dx + dy*dy + dz*dz)
+end
+
+-- Ambil posisi player lokal
+local function getLocalPlayerPosition()
+    local character = Players.LocalPlayer.Character
+    if not character then return nil end
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return nil end
+    local pos = rootPart.Position
+    return { x = pos.X, y = pos.Y, z = pos.Z }
+end
+
+-- Cek apakah userId lokal ada dalam list userIds
 local function isUserIdInSameInstance(userIds)
     local localUserId = Players.LocalPlayer.UserId
     for _, userId in ipairs(userIds) do
@@ -85,26 +104,57 @@ local function main()
                     if instanceChatCounts[game.JobId] >= MAX_CHAT_PER_INSTANCE then
                         print("🚫 Batas chat tercapai untuk instance ini")
                     else
-                        -- Ambil userId lain yang ada di instance ini
-                        local userIdResp = makeHttpRequest("GET", "/getUserIds?instanceId=" .. instanceId)
-                        if userIdResp and userIdResp.StatusCode == 200 then
-                            local successIds, dataIds = pcall(HttpService.JSONDecode, HttpService, userIdResp.Body)
-                            if successIds and dataIds.userIds then
-                                -- Kirim chat hanya jika userId kita ada di data userIds (berarti kita satu server)
-                                if isUserIdInSameInstance(dataIds.userIds) then
-                                    pcall(function()
-                                        TextChatService.TextChannels.RBXGeneral:SendAsync(CHAT_MESSAGE)
-                                        instanceChatCounts[game.JobId] = (instanceChatCounts[game.JobId] or 0) + 1
-                                        print("💬 Mengirim chat (", instanceChatCounts[game.JobId], "/", MAX_CHAT_PER_INSTANCE, ")")
-                                    end)
+                        -- Ambil userId dan posisi user lain di instance ini
+                        local userPosResp = makeHttpRequest("GET", "/getUserPositions?instanceId=" .. instanceId)
+                        if userPosResp and userPosResp.StatusCode == 200 then
+                            local successPos, dataUsers = pcall(HttpService.JSONDecode, HttpService, userPosResp.Body)
+                            if successPos and dataUsers.users then
+                                local localPos = getLocalPlayerPosition()
+                                if not localPos then
+                                    warn("⚠️ Gagal mendapatkan posisi lokal player")
                                 else
-                                    print("❌ UserId lokal tidak ditemukan di server ini, skip chat")
+                                    -- Cek apakah userId lokal ada di daftar user
+                                    local foundLocalUser = false
+                                    for _, user in ipairs(dataUsers.users) do
+                                        if user.userId == Players.LocalPlayer.UserId then
+                                            foundLocalUser = true
+                                            break
+                                        end
+                                    end
+
+                                    if not foundLocalUser then
+                                        print("❌ UserId lokal tidak ditemukan di server ini, skip chat")
+                                    else
+                                        -- Cek jarak ke semua user, jika ada user lain dalam radius MAX_DISTANCE maka boleh chat
+                                        local canChat = false
+                                        for _, user in ipairs(dataUsers.users) do
+                                            if user.userId ~= Players.LocalPlayer.UserId then
+                                                if user.position then
+                                                    local dist = getDistance(localPos, user.position)
+                                                    if dist <= MAX_DISTANCE then
+                                                        canChat = true
+                                                        break
+                                                    end
+                                                end
+                                            end
+                                        end
+
+                                        if canChat then
+                                            pcall(function()
+                                                TextChatService.TextChannels.RBXGeneral:SendAsync(CHAT_MESSAGE)
+                                                instanceChatCounts[game.JobId] = (instanceChatCounts[game.JobId] or 0) + 1
+                                                print("💬 Mengirim chat (", instanceChatCounts[game.JobId], "/", MAX_CHAT_PER_INSTANCE, ")")
+                                            end)
+                                        else
+                                            print("🛑 Tidak ada user lain dalam radius " .. MAX_DISTANCE .. ", hentikan chat")
+                                        end
+                                    end
                                 end
                             else
-                                warn("Gagal parsing userIds dari server")
+                                warn("Gagal parsing data posisi user dari server")
                             end
                         else
-                            warn("Gagal mendapatkan userIds dari server")
+                            warn("Gagal mendapatkan posisi user dari server")
                         end
                     end
                 else
