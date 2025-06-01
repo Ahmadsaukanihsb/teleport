@@ -96,7 +96,7 @@ local function main()
         updateUserPosition()
 
         local userId = Players.LocalPlayer.UserId
-        local res = makeHttpRequest("GET", "/getInstanceId?userId=" .. tostring(userId))
+        local res = makeHttpRequest("GET", "/api/getInstanceId?userId=" .. tostring(userId))
         if res and res.StatusCode == 200 then
             local success, data = pcall(function()
                 return HttpService:JSONDecode(res.Body)
