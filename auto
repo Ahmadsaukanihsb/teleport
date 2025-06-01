@@ -4,33 +4,39 @@ local HttpService = game:GetService("HttpService")
 local TextChatService = game:GetService("TextChatService")
 
 -- Config
-local REDIS_API_URL = "https://c98f-36-76-129-51.ngrok-free.app"
+local REDIS_API_URL = "https://04dd-36-76-129-51.ngrok-free.app"
 local PLACE_ID = 126884695634066
 local CHECK_INTERVAL = 15
 local MAX_CHAT_PER_INSTANCE = 3
 local TELEPORT_COOLDOWN = 30
-local CHAT_MESSAGE = "dsadasdsa"
+local CHAT_MESSAGE = "Hello from Roblox!"
 local MAX_DISTANCE = 20
 
--- Penyimpanan lokal
+-- Local storage
 local instanceChatCounts = {}
 local lastTeleportAttempt = 0
 
--- Fungsi Duluan (karena dipakai di bawah)
+-- Helper functions
 local function getLocalPlayerPosition()
     local character = Players.LocalPlayer.Character
     if not character then return nil end
     local rootPart = character:FindFirstChild("HumanoidRootPart")
     if not rootPart then return nil end
-    local pos = rootPart.Position
-    return { x = pos.X, y = pos.Y, z = pos.Z }
+    return { x = rootPart.Position.X, y = rootPart.Position.Y, z = rootPart.Position.Z }
+end
+
+local function parseJsonSafely(jsonStr)
+    local success, result = pcall(function()
+        return HttpService:JSONDecode(jsonStr)
+    end)
+    return success and result or nil
 end
 
 local function makeHttpRequest(method, endpoint, body)
     local url = REDIS_API_URL .. endpoint
     local headers = {
         ["Content-Type"] = "application/json",
-        ["ngrok-skip-browser-warning"] = "true" -- Bypass Ngrok's browser warning
+        ["ngrok-skip-browser-warning"] = "true"
     }
     local requestBody = body and HttpService:JSONEncode(body) or nil
 
@@ -44,156 +50,166 @@ local function makeHttpRequest(method, endpoint, body)
     end)
 
     if not success then
-        warn("HTTP request failed completely:", response)
+        warn("HTTP request failed:", response)
         return nil
     end
 
-    -- Debug the raw response
-    print("HTTP Response Status:", response.StatusCode)
-    print("Response Body:", response.Body)
-
-    -- Check if we got HTML instead of JSON
-    if response.Body:match("<!DOCTYPE html>") then
-        warn("Received HTML response instead of JSON - check Ngrok tunnel")
-        return nil
-    end
-
+    print("HTTP", response.StatusCode, endpoint)
     return response
+end
+
+local function fetchWithRetry(method, endpoint, body, maxRetries)
+    local retries = 0
+    while retries < (maxRetries or 3) do
+        local res = makeHttpRequest(method, endpoint, body)
+        if res and res.StatusCode == 200 then
+            return res
+        end
+        retries += 1
+        task.wait(2 ^ retries)
+    end
+    return nil
 end
 
 local function updateUserInstance()
     local userId = Players.LocalPlayer.UserId
     local instanceId = game.JobId
-    local body = { instanceId = instanceId, userId = userId }
-    local res = makeHttpRequest("POST", "/api/setInstanceUser", body)
-    if not (res and res.StatusCode == 200) then
-        warn("Failed to update user instance")
+    local res = fetchWithRetry("POST", "/api/setInstanceUser", {
+        instanceId = instanceId,
+        userId = userId
+    })
+    
+    if not res then
+        warn("Failed to update instance")
+        return false
     end
+    
+    local data = parseJsonSafely(res.Body)
+    if not data or not data.success then
+        warn("Invalid response:", res.Body)
+        return false
+    end
+    
+    return true
 end
 
 local function updateUserPosition()
     local userId = Players.LocalPlayer.UserId
     local instanceId = game.JobId
     local pos = getLocalPlayerPosition()
-    if not pos then return end
+    if not pos then return false end
 
-    local body = { instanceId = instanceId, userId = userId, position = pos }
-    local res = makeHttpRequest("POST", "/api/setUserPosition", body)
-    if not (res and res.StatusCode == 200) then
-        warn("Failed to update user position")
-    end
+    local res = fetchWithRetry("POST", "/api/setUserPosition", {
+        instanceId = instanceId,
+        userId = userId,
+        position = pos
+    })
+    
+    return res and res.StatusCode == 200
 end
 
 local function safeTeleport(instanceId)
     if os.time() - lastTeleportAttempt < TELEPORT_COOLDOWN then
-        print("⏳ Cooldown teleport, tunggu", TELEPORT_COOLDOWN - (os.time() - lastTeleportAttempt), "detik")
+        print("Teleport cooldown...")
         return false
     end
+    
     lastTeleportAttempt = os.time()
-    pcall(function()
+    local success = pcall(function()
         TeleportService:TeleportToPlaceInstance(PLACE_ID, instanceId, Players.LocalPlayer)
     end)
-    return true
+    
+    if success then
+        task.wait(5)
+        return true
+    end
+    return false
 end
 
 local function getDistance(pos1, pos2)
+    if not pos1 or not pos2 then return math.huge end
     local dx = pos1.x - pos2.x
     local dy = pos1.y - pos2.y
     local dz = pos1.z - pos2.z
     return math.sqrt(dx*dx + dy*dy + dz*dz)
 end
 
+-- Main loop
 local function main()
     while task.wait(CHECK_INTERVAL) do
-        updateUserInstance()
-        updateUserPosition()
+        -- Update current status
+        if not updateUserInstance() then continue end
+        if not updateUserPosition() then continue end
 
+        -- Get target instance
         local userId = Players.LocalPlayer.UserId
-        local res = makeHttpRequest("GET", "/api/getInstanceId?userId=" .. tostring(userId))
-        if res and res.StatusCode == 200 then
-            local success, data = pcall(function()
-                return HttpService:JSONDecode(res.Body)
-            end)
-            if success and data.instanceId then
-                local instanceId = data.instanceId
+        local res = fetchWithRetry("GET", "/api/getInstanceId?userId="..userId)
+        if not res or res.StatusCode ~= 200 then
+            warn("Failed to get instance ID")
+            continue
+        end
 
-                if not instanceChatCounts[instanceId] then
-                    instanceChatCounts[instanceId] = 0
-                    print("🆕 Instance baru terdeteksi:", instanceId)
+        local data = parseJsonSafely(res.Body)
+        if not data or not data.success or not data.instanceId then
+            warn("Invalid instance data:", res.Body)
+            continue
+        end
+
+        local targetInstance = data.instanceId
+        local currentInstance = game.JobId
+
+        -- Handle instance switching
+        if targetInstance ~= currentInstance then
+            print("Teleporting to", targetInstance)
+            safeTeleport(targetInstance)
+            continue
+        end
+
+        -- Handle chat logic
+        local chatCount = instanceChatCounts[currentInstance] or 0
+        if chatCount >= MAX_CHAT_PER_INSTANCE then
+            print("Chat limit reached")
+            continue
+        end
+
+        -- Get nearby players
+        local posRes = fetchWithRetry("GET", "/api/getUserPositions?instanceId="..currentInstance)
+        if not posRes or posRes.StatusCode ~= 200 then
+            warn("Failed to get positions")
+            continue
+        end
+
+        local posData = parseJsonSafely(posRes.Body)
+        if not posData or not posData.success or not posData.users then
+            warn("Invalid position data")
+            continue
+        end
+
+        -- Check distances
+        local localPos = getLocalPlayerPosition()
+        local shouldChat = false
+        
+        for _, user in ipairs(posData.users) do
+            if user.userId ~= userId and user.position then
+                if getDistance(localPos, user.position) <= MAX_DISTANCE then
+                    shouldChat = true
+                    break
                 end
-
-                if instanceId == game.JobId then
-                    print("✅ Berada di instance", game.JobId, "| Chat terkirim:", instanceChatCounts[game.JobId] or 0, "/", MAX_CHAT_PER_INSTANCE)
-
-                    if instanceChatCounts[game.JobId] >= MAX_CHAT_PER_INSTANCE then
-                        print("🚫 Batas chat tercapai untuk instance ini")
-                    else
-                        local posResp = makeHttpRequest("GET", "/api/getUserPositions?instanceId=" .. instanceId)
-                        if posResp and posResp.StatusCode == 200 then
-                            local successPos, dataUsers = pcall(function()
-                                return HttpService:JSONDecode(posResp.Body)
-                            end)
-                            if successPos and dataUsers.users then
-                                local localPos = getLocalPlayerPosition()
-                                if not localPos then
-                                    warn("⚠️ Gagal mendapatkan posisi lokal player")
-                                else
-                                    local foundLocalUser = false
-                                    for _, user in ipairs(dataUsers.users) do
-                                        if user.userId == userId then
-                                            foundLocalUser = true
-                                            break
-                                        end
-                                    end
-
-                                    if not foundLocalUser then
-                                        print("❌ UserId lokal tidak ditemukan di server ini, skip chat")
-                                    else
-                                        local canChat = false
-                                        for _, user in ipairs(dataUsers.users) do
-                                            if user.userId ~= userId and user.position then
-                                                local dist = getDistance(localPos, user.position)
-                                                if dist <= MAX_DISTANCE then
-                                                    canChat = true
-                                                    break
-                                                end
-                                            end
-                                        end
-
-                                        if canChat then
-                                            pcall(function()
-                                                TextChatService.TextChannels.RBXGeneral:SendAsync(CHAT_MESSAGE)
-                                                instanceChatCounts[game.JobId] = (instanceChatCounts[game.JobId] or 0) + 1
-                                                print("💬 Mengirim chat (", instanceChatCounts[game.JobId], "/", MAX_CHAT_PER_INSTANCE, ")")
-                                            end)
-                                        else
-                                            print("🛑 Tidak ada user lain dalam radius " .. MAX_DISTANCE .. ", hentikan chat")
-                                        end
-                                    end
-                                end
-                            else
-                                warn("Gagal parsing data posisi user dari server")
-                            end
-                        else
-                            warn("Gagal mendapatkan posisi user dari server")
-                        end
-                    end
-                else
-                    print("🔄 Instance berbeda, teleporting ke", instanceId)
-                    if instanceChatCounts[game.JobId] then
-                        instanceChatCounts[game.JobId] = nil
-                    end
-                    if safeTeleport(instanceId) then
-                        task.wait(5)
-                    end
-                end
-            else
-                warn("Gagal parsing data instanceId:", res.Body)
             end
+        end
+
+        -- Send chat if someone is nearby
+        if shouldChat then
+            pcall(function()
+                TextChatService.TextChannels.RBXGeneral:SendAsync(CHAT_MESSAGE)
+                instanceChatCounts[currentInstance] = chatCount + 1
+                print("Sent chat ("..(chatCount + 1).."/"..MAX_CHAT_PER_INSTANCE..")")
+            end)
         else
-            warn("Gagal mendapatkan instanceId dari server")
+            print("No nearby players")
         end
     end
 end
 
+-- Start the system
 task.spawn(main)
