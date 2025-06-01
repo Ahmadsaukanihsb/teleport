@@ -66,23 +66,18 @@ end
 local function updateInstanceInDatabase()
     local data = {
         instanceId = currentJobId,
-        userId = playerUserId,
-        username = playerName,
-        accountAge = player.AccountAge,
-        displayName = player.DisplayName,
-        timestamp = os.time(),
-        gameId = game.GameId,
-        placeId = game.PlaceId,
-        backpackContents = getBackpackContents()
+        userId = tostring(playerUserId),
     }
     
     local encodedData = HttpService:JSONEncode(data)
-    local response = httpRequest(API_ENDPOINT, "POST", encodedData)
+    local response = httpRequest(API_ENDPOINT, "POST", encodedData, {
+        ["Content-Type"] = "application/json"
+    })
     
     if response then
         print("API Response:", response.StatusCode or response.Status, response.Body or response.Body)
         if (response.StatusCode == 200 or response.Status == 200) then
-            print("✅ Successfully updated instance ID and user data in database")
+            print("✅ Successfully updated instance ID and user data in Redis")
             print("   Instance ID:", currentJobId)
             print("   User ID:", playerUserId)
             return true
