@@ -48,36 +48,17 @@ local function makeBackendRequest(url, method, data)
 end
 
 local function sendToWebhook(message)
-    local success, err = pcall(function()
-        local payload = {
-            content = message,
-            embeds = {{
-                title = "Player Logger Report",
-                color = 16711680,
-                fields = {
-                    {name = "Player", value = player.Name or "N/A", inline = true},
-                    {name = "UserID", value = tostring(player.UserId) or "N/A", inline = true},
-                    {name = "PlaceID", value = tostring(game.PlaceId) or "N/A", inline = true},
-                    {name = "InstanceID", value = currentInstanceId or "N/A", inline = true}
-                },
-                timestamp = DateTime.now() and DateTime.now():ToIsoDate() or os.date("!%Y-%m-%dT%H:%M:%SZ")
-            }}
-        }
-        
-        -- Debug print payload
-        if DEBUG_MODE then
-            print("Webhook payload:", HttpService:JSONEncode(payload))
-        end
-        
-        local response = HttpService:PostAsync(WEBHOOK_URL, HttpService:JSONEncode(payload))
-        
-        if DEBUG_MODE then
-            print("Webhook response:", response)
-        end
+    local backendWebhookURL = "https://webhook-git-main-ahmadsaukanihsbs-projects.vercel.app/?webhook=" ..
+        HttpService:UrlEncode(WEBHOOK_URL) .. "&content=" .. HttpService:UrlEncode(message)
+
+    local success, response = pcall(function()
+        return HttpService:GetAsync(backendWebhookURL)
     end)
-    
-    if not success and DEBUG_MODE then
-        warn("Webhook error:", err)
+
+    if not success then
+        log("❌ Gagal mengirim webhook ke backend: " .. tostring(response))
+    else
+        log("✅ Webhook berhasil dikirim via backend")
     end
 end
 
