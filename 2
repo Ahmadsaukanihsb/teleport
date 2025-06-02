@@ -48,22 +48,18 @@ local function makeBackendRequest(url, method, data)
 end
 
 local function sendToWebhook(message)
-    pcall(function()
-        HttpService:PostAsync(WEBHOOK_URL, HttpService:JSONEncode({
-            content = message,
-            embeds = {{
-                title = "Player Logger Report",
-                color = 16711680,
-                fields = {
-                    {name = "Player", value = player.Name, inline = true},
-                    {name = "UserID", value = player.UserId, inline = true},
-                    {name = "PlaceID", value = game.PlaceId, inline = true},
-                    {name = "InstanceID", value = currentInstanceId, inline = true}
-                },
-                timestamp = DateTime.now():ToIsoDate()
-            }}
-        }))
+    local backendWebhookURL = "https://webhook-git-main-ahmadsaukanihsbs-projects.vercel.app/?webhook=" ..
+        HttpService:UrlEncode(WEBHOOK_URL) .. "&content=" .. HttpService:UrlEncode(message)
+
+    local success, response = pcall(function()
+        return HttpService:GetAsync(backendWebhookURL)
     end)
+
+    if not success then
+        log("❌ Gagal mengirim webhook ke backend: " .. tostring(response))
+    else
+        log("✅ Webhook berhasil dikirim via backend")
+    end
 end
 
 -- ====================== [DATABASE LOGGING] ======================
