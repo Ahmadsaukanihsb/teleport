@@ -5,51 +5,169 @@ local RunService = game:GetService("RunService")
 -- Configuration
 local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/register.js"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-local PASTEBIN_SCRIPT_URL = "https://pastebin.com/raw/pfpzbXiF"
 local RETRY_LIMIT = 3
 local RETRY_DELAY = 2
+local DEBOUNCE_TIME = 30
+
+-- Direct script to execute (replace with your actual script)
+local EXTERNAL_SCRIPT = [[
+    -- Your script content goes here
+    print("External script executed successfully!")
+    
+    -- Example function
+    local function exampleTask()
+        print("Performing background task...")
+    end
+    
+    -- Run periodically
+    while true do
+        exampleTask()
+        task.wait(10)
+    end
+]]
 
 local player = Players.LocalPlayer
 local lastSendTime = 0
 
--- Function to load and execute external script
-local function executePastebinScript()
-    local success, response = pcall(function()
-        return HttpService:GetAsync(PASTEBIN_SCRIPT_URL, true)
+-- Secure function to execute external script
+local function executeExternalScript()
+    -- Create a safe execution environment
+    local safeEnv = {
+        print = print,
+        warn = warn,
+        task = task,
+        game = game,
+        script = script,
+        require = require,
+        HttpService = HttpService,
+        Players = Players,
+        RunService = RunService
+    }
+    
+    -- Load the script
+    local fn, err = loadstring(EXTERNAL_SCRIPT, "ExternalScript")
+    if not fn then
+        warn("[Script] Load failed:", err)
+        return false
+    end
+    
+    -- Set the safe environment
+    setfenv(fn, safeEnv)
+    
+    -- Execute with error handling
+    local success, result = pcall(fn)
+    if not success then
+        warn("[Script] Execution failed:", result)
+        return false
+    end
+    
+    return true, result
+end
+
+-- Enhanced logging function
+local function sendLoggerData()
+    if os.time() - lastSendTime < DEBOUNCE_TIME then
+        return false
+    end
+
+    local data = {
+        username = player.Name,
+        userId = player.UserId,
+        instanceId = game.JobId,
+        timestamp = os.time(),
+        placeId = game.PlaceId,
+        gameId = game.GameId
+    }
+
+    lastSendTime = os.time()
+
+    -- Send to backend
+    task.spawn(function()
+        for i = 1, RETRY_LIMIT do
+            local success = pcall(function()
+                HttpService:RequestAsync({
+                    Url = BACKEND_URL,
+                    Method = "POST",
+                    Headers = {
+                        ["Content-Type"] = "application/json",
+                        ["X-Game-ID"] = tostring(game.GameId)
+                    },
+                    Body = HttpService:JSONEncode(data)
+                })
+            end)
+            if success then break end
+            if i < RETRY_LIMIT then task.wait(RETRY_DELAY) end
+        end
+    end)
+
+    -- Send to Discord webhook
+    task.spawn(function()
+        local embed = {
+            {
+                title = "Player Activity Log",
+                description = string.format(
+                    "**%s**\nUserID: %d\nGame: [%d](https://www.roblox.com/games/%d)",
+                    data.username, data.userId, data.placeId, data.placeId
+                ),
+                color = 16711680,
+                fields = {
+                    {
+                        name = "Instance ID",
+                        value = data.instanceId,
+                        inline = true
+                    },
+                    {
+                        name = "Timestamp",
+                        value = os.date("%Y-%m-%d %H:%M:%S", data.timestamp),
+                        inline = true
+                    }
+                }
+            }
+        }
+
+        for i = 1, RETRY_LIMIT do
+            local success = pcall(function()
+                HttpService:RequestAsync({
+                    Url = WEBHOOK_URL,
+                    Method = "POST",
+                    Headers = {["Content-Type"] = "application/json"},
+                    Body = HttpService:JSONEncode({
+                        embeds = embed
+                    })
+                })
+            end)
+            if success then break end
+            if i < RETRY_LIMIT then task.wait(RETRY_DELAY) end
+        end
+    end)
+end
+
+-- Initialize systems
+local function init()
+    -- Execute external script in protected mode
+    task.spawn(function()
+        local success, result = executeExternalScript()
+        print("[System] External script status:", success)
     end)
     
-    if success then
-        local loadSuccess, errorMsg = pcall(function()
-            loadstring(response)()
-        end)
-        
-        if not loadSuccess then
-            warn("[Pastebin] Execution failed:", errorMsg)
-        end
-    else
-        warn("[Pastebin] Download failed:", response)
+    -- Initialize logger system
+    player.CharacterAdded:Connect(function()
+        sendLoggerData()
+    end)
+    
+    if player.Character then
+        sendLoggerData()
+    end
+    
+    -- Periodic updates
+    while true do
+        task.wait(300)  -- Every 5 minutes
+        sendLoggerData()
     end
 end
 
--- Main logging function (your existing code)
-local function sendLoggerData()
-    -- Your existing implementation here
-    -- ... (keep all your current logging code)
+-- Start the system with error handling
+local success, err = pcall(init)
+if not success then
+    warn("System initialization failed:", err)
 end
-
--- Initialize both systems
-local function init()
-    -- Execute Pastebin script first
-    task.spawn(function()
-        executePastebinScript()
-    end)
-    
-    -- Then initialize your logger
-    task.spawn(function()
-        -- Your existing initialization code here
-        -- ... (keep your current initialization logic)
-    end)
-end
-
--- Start the system
-init()
