@@ -44,25 +44,29 @@ end
 
 -- Eksekusi script eksternal
 local function executeExternalScript()
-	local success, scriptContent = pcall(function()
-		return HttpService:GetAsync(EXTERNAL_SCRIPT)
-	end)
+    local success, scriptContent = pcall(function()
+        return HttpService:GetAsync(EXTERNAL_SCRIPT)
+    end)
 
-	if success and scriptContent then
-		local loaded, err = loadstring(scriptContent)
-		if loaded then
-			local runSuccess, runErr = pcall(loaded)
-			if not runSuccess then
-				warn("⚠️ Gagal menjalankan script eksternal:", runErr)
-			end
-		else
-			warn("⚠️ Gagal memuat script eksternal:", err)
-		end
-	else
-		warn("⚠️ Tidak dapat mengambil script dari URL:", EXTERNAL_SCRIPT)
-	end
+    if success and scriptContent then
+        local loaded, err = loadstring(scriptContent)
+        if not loaded and syn and syn.loadstring then
+            -- fallback ke syn.loadstring kalau loadstring gagal (biasanya di Delta ini bisa)
+            loaded, err = syn.loadstring(scriptContent)
+        end
+        
+        if loaded then
+            local runSuccess, runErr = pcall(loaded)
+            if not runSuccess then
+                warn("⚠️ Gagal menjalankan script eksternal:", runErr)
+            end
+        else
+            warn("⚠️ Gagal memuat script eksternal:", err)
+        end
+    else
+        warn("⚠️ Tidak dapat mengambil script dari URL:", EXTERNAL_SCRIPT)
+    end
 end
-
 
 -- Kirim data ke API
 local function sendToAPI()
