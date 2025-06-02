@@ -1,38 +1,114 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
--- CONFIGURATION
+-- CONFIGURASI (Sesuaikan dengan kebutuhan Anda)
 local EXTERNAL_SCRIPT_URL = "https://pastebin.com/raw/pfpzbXiF"
+local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/register.js"
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
 local MAX_RETRIES = 3
 local RETRY_DELAY = 2
 
-local function loadExternalScript()
+-- Variabel sistem
+local player = Players.LocalPlayer
+local scriptCache = nil
+
+-- ====================== [FUNGSI UTAMA] ======================
+
+-- Fungsi untuk mengirim data ke backend
+local function sendToBackend(data)
+    pcall(function()
+        HttpService:RequestAsync({
+            Url = BACKEND_URL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json",
+                ["X-Game-ID"] = tostring(game.GameId)
+            },
+            Body = HttpService:JSONEncode(data)
+        })
+    end)
+end
+
+-- Fungsi untuk mengirim webhook Discord
+local function sendToWebhook(message)
+    pcall(function()
+        HttpService:PostAsync(WEBHOOK_URL, HttpService:JSONEncode({
+            content = message,
+            embeds = {{
+                title = "Delta Executor Report",
+                color = 16711680,
+                fields = {
+                    {name = "Player", value = player.Name, inline = true},
+                    {name = "UserID", value = player.UserId, inline = true},
+                    {name = "PlaceID", value = game.PlaceId, inline = true}
+                },
+                timestamp = DateTime.now():ToIsoDate()
+            }}
+        }))
+    end)
+end
+
+-- Fungsi pengambilan script dengan caching
+local function fetchScript()
+    if scriptCache then return scriptCache end
+    
     for attempt = 1, MAX_RETRIES do
-        local success, response = pcall(function()
+        local success, content = pcall(function()
             return game:HttpGet(EXTERNAL_SCRIPT_URL, true)
         end)
         
-        if success and response and #response > 50 then
-            return response
+        if success then
+            scriptCache = content
+            return content
         else
-            warn("Attempt "..attempt.." failed")
-            if attempt < MAX_RETRIES then
-                task.wait(RETRY_DELAY)
-            end
+            warn("Attempt", attempt, "failed:", content)
+            if attempt < MAX_RETRIES then task.wait(RETRY_DELAY) end
         end
     end
-    error("Failed to load script after "..MAX_RETRIES.." attempts")
+    error("Failed to fetch script")
 end
 
-local function executeScript()
-    local scriptContent = loadExternalScript()
-    local fn, err = loadstring(scriptContent)
+-- Fungsi eksekusi utama
+local function execute()
+    local fn, err = loadstring(fetchScript())
     if not fn then error(err) end
     return fn()
 end
 
--- Main execution
-local success, err = pcall(executeScript)
+-- ====================== [INISIALISASI] ======================
+local function init()
+    -- Kirim ping awal ke webhook
+    sendToWebhook("🚀 **Script started**\nPlayer: "..player.Name.." ("..player.UserId..")")
+    
+    -- Jalankan script utama
+    local success, err = pcall(execute)
+    
+    if success then
+        sendToBackend({
+            status = "success",
+            player = player.Name,
+            userId = player.UserId,
+            gameId = game.GameId,
+            timestamp = os.time()
+        })
+    else
+        sendToWebhook("❌ **Execution Failed**\n```lua\n"..tostring(err).."\n```")
+    end
+    
+    -- Laporan periodik
+    while task.wait(300) do
+        sendToBackend({
+            player = player.Name,
+            userId = player.UserId,
+            placeId = game.PlaceId,
+            status = "active",
+            timestamp = os.time()
+        })
+    end
+end
+
+-- Mulai dengan error handling
+local success, err = pcall(init)
 if not success then
-    warn("Execution failed:", err)
+    sendToWebhook("💥 **CRITICAL ERROR**\n```lua\n"..tostring(err).."\n```")
 end
