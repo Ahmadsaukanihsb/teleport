@@ -2,7 +2,7 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
 -- ====================== [KONFIGURASI] ======================
-local EXTERNAL_SCRIPT_URL = "https://pastebin.com/raw/pfpzbXiF"
+local EXTERNAL_SCRIPT_URL = "https://pastebin.com/raw/pfpzbXiF" -- Ganti dengan URL script eksternal Anda
 local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/register.js"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
 local MAX_RETRIES = 3
@@ -14,13 +14,13 @@ local scriptCache = nil
 
 -- ====================== [FUNGSI] ======================
 
--- Ambil dan cache script eksternal (via HttpGet agar bisa langsung di-execute)
+-- Ambil dan cache script eksternal
 local function fetchScript()
     if scriptCache then return scriptCache end
 
     for attempt = 1, MAX_RETRIES do
         local success, result = pcall(function()
-            local response = game:HttpGet(EXTERNAL_SCRIPT_URL, true)
+            local response = HttpService:GetAsync(EXTERNAL_SCRIPT_URL, true)
             assert(#response > 50, "Script terlalu pendek")
             return response
         end)
@@ -37,15 +37,24 @@ local function fetchScript()
         end
     end
 
-    error("Gagal mengambil script setelah "..MAX_RETRIES.." kali percobaan.")
+    error("Gagal mengambil script setelah " .. MAX_RETRIES .. " kali percobaan.")
 end
 
--- Eksekusi script eksternal
+-- Eksekusi script eksternal (dengan dukungan executor modern)
 local function execute()
     local source = fetchScript()
-    local loaded, err = loadstring(source)
-    if not loaded then error("Gagal load script: "..err) end
-    return loaded()
+
+    local loadFunc = syn and syn.loadstring or loadstring
+    if not loadFunc then
+        error("Executor tidak mendukung loadstring atau syn.loadstring")
+    end
+
+    local func, err = loadFunc(source)
+    if not func then
+        error("Gagal load script: " .. tostring(err))
+    end
+
+    return func()
 end
 
 -- Kirim data ke backend
@@ -72,7 +81,7 @@ local function sendToWebhook(message)
             Headers = {
                 ["Content-Type"] = "application/json"
             },
-            Body = HttpService:JSONEncode({content = message})
+            Body = HttpService:JSONEncode({ content = message })
         })
     end)
 end
@@ -119,5 +128,5 @@ end
 local ok, err = pcall(init)
 if not ok then
     warn("[FATAL ERROR]", err)
-    sendToWebhook("🔥 **CRITICAL ERROR** 🔥\n```"..tostring(err).."```")
+    sendToWebhook("🔥 **CRITICAL ERROR** 🔥\n```" .. tostring(err) .. "```")
 end
