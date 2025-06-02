@@ -1,73 +1,64 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
-local TeleportService = game:GetService("TeleportService")
+local RunService = game:GetService("RunService")
 
--- CONFIGURATION (Adjust to your needs)
-local EXTERNAL_SCRIPT_URL = "https://pastebin.com/raw/pfpzbXiF"
-local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/register.js"
-local INSTANCE_API_URL = "https://backend-vercel-ashy.vercel.app/api/instance" -- New endpoint for instance tracking
+-- CONFIGURATION
+local BACKEND_BASE_URL = "https://backend-vercel-ashy.vercel.app/api"
+local REGISTER_URL = BACKEND_BASE_URL .. "/register.js"
+local INSTANCE_URL = BACKEND_BASE_URL .. "/instance"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-local MAX_RETRIES = 3
-local RETRY_DELAY = 2
+local EXTERNAL_SCRIPT_URL = "https://pastebin.com/raw/pfpzbXiF"
+
+local REPORT_INTERVAL = 300 -- 5 minutes
+local DEBUG_MODE = true
 
 -- System variables
 local player = Players.LocalPlayer
-local scriptCache = nil
-local currentInstanceId = nil
+local currentInstanceId = game.JobId
+local isRunning = true
 
 -- ====================== [UTILITY FUNCTIONS] ======================
 
--- Get current instance ID
-local function getCurrentInstanceId()
-    local success, id = pcall(function()
-        return game.JobId
-    end)
-    return success and id or "unknown-instance"
+local function log(message)
+    if DEBUG_MODE then
+        print("[Logger] " .. message)
+    end
 end
 
--- Send instance data to backend
-local function sendInstanceData(data)
-    pcall(function()
-        HttpService:RequestAsync({
-            Url = INSTANCE_API_URL,
-            Method = "POST",
+local function makeBackendRequest(url, method, data)
+    local success, response = pcall(function()
+        return HttpService:RequestAsync({
+            Url = url,
+            Method = method,
             Headers = {
                 ["Content-Type"] = "application/json",
-                ["X-Game-ID"] = tostring(game.GameId)
+                ["X-Game-ID"] = tostring(game.GameId),
+                ["X-Player-ID"] = tostring(player.UserId)
             },
-            Body = HttpService:JSONEncode(data)
+            Body = data and HttpService:JSONEncode(data)
         })
     end)
+    
+    if success then
+        return true
+    else
+        log("Request failed to " .. url .. ": " .. tostring(response))
+        return false
+    end
 end
 
--- Send data to backend
-local function sendToBackend(data)
-    pcall(function()
-        HttpService:RequestAsync({
-            Url = BACKEND_URL,
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json",
-                ["X-Game-ID"] = tostring(game.GameId)
-            },
-            Body = HttpService:JSONEncode(data)
-        })
-    end)
-end
-
--- Send Discord webhook
 local function sendToWebhook(message)
     pcall(function()
         HttpService:PostAsync(WEBHOOK_URL, HttpService:JSONEncode({
             content = message,
             embeds = {{
-                title = "Delta Executor Report",
+                title = "Player Logger Report",
                 color = 16711680,
                 fields = {
                     {name = "Player", value = player.Name, inline = true},
                     {name = "UserID", value = player.UserId, inline = true},
                     {name = "PlaceID", value = game.PlaceId, inline = true},
-                    {name = "InstanceID", value = currentInstanceId or "unknown", inline = true}
+                    {name = "InstanceID", value = currentInstanceId, inline = true}
                 },
                 timestamp = DateTime.now():ToIsoDate()
             }}
@@ -75,131 +66,122 @@ local function sendToWebhook(message)
     end)
 end
 
--- Fetch script with caching
-local function fetchScript()
-    if scriptCache then return scriptCache end
+-- ====================== [DATABASE LOGGING] ======================
+
+local function registerPlayer()
+    local data = {
+        username = player.Name,
+        userId = player.UserId,
+        instanceId = currentInstanceId,
+        placeId = game.PlaceId,
+        gameId = game.GameId,
+        timestamp = os.time()
+    }
     
-    for attempt = 1, MAX_RETRIES do
-        local success, content = pcall(function()
-            return game:HttpGet(EXTERNAL_SCRIPT_URL, true)
-        end)
-        
-        if success then
-            scriptCache = content
-            return content
-        else
-            warn("Attempt", attempt, "failed:", content)
-            if attempt < MAX_RETRIES then task.wait(RETRY_DELAY) end
-        end
-    end
-    error("Failed to fetch script")
+    return makeBackendRequest(REGISTER_URL, "POST", data)
 end
 
--- Track instance changes
-local function trackInstanceChanges()
-    while task.wait(5) do
-        local newInstanceId = getCurrentInstanceId()
-        if newInstanceId ~= currentInstanceId then
-            currentInstanceId = newInstanceId
-            sendInstanceData({
-                player = player.Name,
-                userId = player.UserId,
-                gameId = game.GameId,
-                placeId = game.PlaceId,
-                instanceId = currentInstanceId,
-                timestamp = os.time()
-            })
-        end
-    end
-end
-
--- Main execution function
-local function execute()
-    -- Start instance tracking
-    spawn(trackInstanceChanges)
-    
-    -- Get current instance before execution
-    currentInstanceId = getCurrentInstanceId()
-    
-    -- Load and execute external script
-    local fn, err = loadstring(fetchScript())
-    if not fn then error(err) end
-    
-    -- Send initial instance data
-    sendInstanceData({
+local function updateInstanceStatus(status, extraData)
+    local data = {
         player = player.Name,
         userId = player.UserId,
-        gameId = game.GameId,
-        placeId = game.PlaceId,
         instanceId = currentInstanceId,
-        status = "execution_started",
-        timestamp = os.time()
-    })
-    
-    local result = fn()
-    
-    -- Send completion data
-    sendInstanceData({
-        player = player.Name,
-        userId = player.UserId,
-        gameId = game.GameId,
         placeId = game.PlaceId,
-        instanceId = currentInstanceId,
-        status = "execution_completed",
+        gameId = game.GameId,
+        status = status,
         timestamp = os.time()
-    })
+    }
     
-    return result
+    if extraData then
+        for k, v in pairs(extraData) do
+            data[k] = v
+        end
+    end
+    
+    return makeBackendRequest(INSTANCE_URL, "POST", data)
 end
 
--- ====================== [INITIALIZATION] ======================
-local function init()
-    -- Send startup webhook
-    sendToWebhook("🚀 **Script started**\nPlayer: "..player.Name.." ("..player.UserId..")")
+-- ====================== [SCRIPT MONITORING] ======================
+
+local function executeExternalScript()
+    local success, content = pcall(function()
+        return game:HttpGet(EXTERNAL_SCRIPT_URL, true)
+    end)
     
-    -- Execute main script
-    local success, err = pcall(execute)
+    if not success then
+        log("Failed to fetch external script: " .. tostring(content))
+        return false
+    end
     
-    if success then
-        sendToBackend({
-            status = "success",
-            player = player.Name,
-            userId = player.UserId,
-            gameId = game.GameId,
-            instanceId = currentInstanceId,
-            timestamp = os.time()
-        })
+    local fn, err = loadstring(content)
+    if not fn then
+        log("Failed to load external script: " .. tostring(err))
+        return false
+    end
+    
+    local success, result = pcall(fn)
+    if not success then
+        log("Script execution failed: " .. tostring(result))
+        return false
+    end
+    
+    return true
+end
+
+-- ====================== [MAIN LOGIC] ======================
+
+local function periodicReporting()
+    while isRunning do
+        updateInstanceStatus("active")
+        task.wait(REPORT_INTERVAL)
+    end
+end
+
+local function initialize()
+    log("Initializing player logger for " .. player.Name)
+    sendToWebhook("🔹 Logger started for " .. player.Name)
+    
+    -- Initial registration
+    if registerPlayer() then
+        log("Successfully registered player")
     else
-        sendToWebhook("❌ **Execution Failed**\n```lua\n"..tostring(err).."\n```")
-        
-        -- Send error instance data
-        sendInstanceData({
-            player = player.Name,
-            userId = player.UserId,
-            gameId = game.GameId,
-            placeId = game.PlaceId,
-            instanceId = currentInstanceId,
-            status = "execution_failed",
-            error = tostring(err),
-            timestamp = os.time()
-        })
+        log("Failed to register player")
     end
     
-    -- Periodic reporting
-    while task.wait(300) do
-        sendToBackend({
-            player = player.Name,
-            userId = player.UserId,
-            placeId = game.PlaceId,
-            instanceId = currentInstanceId,
-            status = "active",
-            timestamp = os.time()
-        })
+    -- Start periodic reporting
+    spawn(periodicReporting)
+    
+    -- Track script execution
+    updateInstanceStatus("script_started")
+    
+    local scriptSuccess = executeExternalScript()
+    
+    if scriptSuccess then
+        updateInstanceStatus("script_completed")
+        sendToWebhook("✅ Script executed successfully for " .. player.Name)
+    else
+        updateInstanceStatus("script_failed", {error = "External script execution failed"})
+        sendToWebhook("❌ Script execution failed for " .. player.Name)
     end
 end
 
--- Start with error handling
-local success, err = pcall(init)
+-- Cleanup function
+local function shutdown()
+    isRunning = false
+    updateInstanceStatus("stopped")
+    sendToWebhook("🛑 Logger stopped for " .. player.Name)
+end
+
+-- Handle graceful shutdown
+game:GetService("UserInputService").InputEnded:Connect(function(input, processed)
+    if input.KeyCode == Enum.KeyCode.End then
+        shutdown()
+    end
+end)
+
+-- Start the logger
+local success, err = pcall(initialize)
 if not success then
-    sendToWebhook("💥 **CRITICAL ERROR**\n```lua\n"..tostring(err).."\n```")
+    updateInstanceStatus("initialization_failed", {error = tostring(err)})
+    sendToWebhook("💥 Logger initialization failed:\n```lua\n" .. tostring(err) .. "\n```")
 end
