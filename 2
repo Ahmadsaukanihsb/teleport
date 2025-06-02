@@ -1,49 +1,53 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
--- CONFIGURASI
-local EXTERNAL_SCRIPT_URL = "https://pastebin.com/raw/pfpzbXiF"  -- URL script Anda
+-- ====================== [KONFIGURASI] ======================
+local EXTERNAL_SCRIPT_URL = "https://pastebin.com/raw/pfpzbXiF" -- Ganti dengan URL script eksternal Anda
 local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/register.js"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
 local MAX_RETRIES = 3
 local RETRY_DELAY = 2
 
+-- ====================== [VARIABEL GLOBAL] ======================
 local player = Players.LocalPlayer
 local scriptCache = nil
 
--- ====================== [FUNGSI UTAMA] ======================
+-- ====================== [FUNGSI] ======================
 
---- Ambil script dari Pastebin dengan caching
+-- Ambil dan cache script eksternal
 local function fetchScript()
     if scriptCache then return scriptCache end
-    
+
     for attempt = 1, MAX_RETRIES do
-        local success, content = pcall(function()
+        local success, result = pcall(function()
             local response = HttpService:GetAsync(EXTERNAL_SCRIPT_URL, true)
             assert(#response > 50, "Script terlalu pendek")
             return response
         end)
-        
+
         if success then
-            scriptCache = content
-            print("[✓] Script berhasil diambil")
-            return content
+            scriptCache = result
+            print("[✓] Script eksternal berhasil diambil.")
+            return result
         else
-            warn(string.format("[×] Percobaan %d gagal: %s", attempt, content))
-            if attempt < MAX_RETRIES then task.wait(RETRY_DELAY) end
+            warn(string.format("[×] Gagal ambil script (Percobaan %d): %s", attempt, result))
+            if attempt < MAX_RETRIES then
+                task.wait(RETRY_DELAY)
+            end
         end
     end
-    error("Gagal mengambil script setelah "..MAX_RETRIES.."x percobaan")
+
+    error("Gagal mengambil script setelah "..MAX_RETRIES.." kali percobaan.")
 end
 
---- Jalankan script eksternal (full access)
+-- Eksekusi script eksternal
 local function execute()
-    local fn, err = loadstring(fetchScript())
-    if not fn then error("Load error: "..err) end
-    return fn()  -- Eksekusi langsung
+    local loaded, err = loadstring(fetchScript())
+    if not loaded then error("Gagal load script: "..err) end
+    return loaded()
 end
 
---- Kirim data ke backend
+-- Kirim data ke backend
 local function sendToBackend(data)
     pcall(function()
         HttpService:RequestAsync({
@@ -58,50 +62,49 @@ local function sendToBackend(data)
     end)
 end
 
---- Kirim notifikasi ke Discord
+-- Kirim notifikasi ke webhook Discord
 local function sendToWebhook(message)
     pcall(function()
         HttpService:RequestAsync({
             Url = WEBHOOK_URL,
             Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
             Body = HttpService:JSONEncode({content = message})
         })
     end)
 end
 
--- ====================== [INISIALISASI] ======================
+-- ====================== [INISIALISASI & LOOP] ======================
 
--- Main system
 local function init()
-    -- 1. Jalankan script eksternal
+    -- Jalankan script eksternal
     local success, result = pcall(execute)
-    
-    -- 2. Laporkan hasil eksekusi
+
     if success then
-        print("[✓] Script berhasil dijalankan!")
+        print("[✓] Script berhasil dijalankan.")
         sendToWebhook(string.format(
-            "**%s** (ID: %d) menjalankan script di game **%s**",
+            "**%s** (ID: %d) menjalankan script di game **%d**",
             player.Name, player.UserId, game.PlaceId
         ))
-        
-        -- Kirim konfirmasi ke backend
         sendToBackend({
             status = "success",
             player = player.Name,
             userId = player.UserId,
+            placeId = game.PlaceId,
             timestamp = os.time()
         })
     else
-        warn("[×] Error:", result)
+        warn("[×] Error saat eksekusi:", result)
         sendToWebhook(string.format(
-            "**ERROR**\nPlayer: %s\n```lua\n%s```",
+            "**❌ ERROR** saat dijalankan oleh %s\n```lua\n%s```",
             player.Name, result
         ))
     end
-    
-    -- 3. Periodic background reporting
-    while task.wait(300) do  -- Setiap 5 menit
+
+    -- Laporan berkala setiap 5 menit
+    while task.wait(300) do
         sendToBackend({
             player = player.Name,
             userId = player.UserId,
@@ -111,7 +114,7 @@ local function init()
     end
 end
 
--- Start dengan error handling
+-- Jalankan dan tangani error kritikal
 local ok, err = pcall(init)
 if not ok then
     warn("[FATAL ERROR]", err)
