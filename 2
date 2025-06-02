@@ -1,6 +1,6 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/register.js"
@@ -11,19 +11,14 @@ local DEBOUNCE_TIME = 30
 
 local lastSendTime = 0
 
--- Fungsi untuk mendapatkan inventory player (contoh implementasi)
+-- Fungsi untuk mendapatkan inventory player
 local function getPlayerInventory()
-    -- Ganti dengan cara mendapatkan inventory yang sesuai dengan game Anda
-    -- Contoh: Panggil RemoteFunction atau cek folder di player
     local inventory = {}
-    
-    -- Contoh sederhana:
     if player:FindFirstChild("Inventory") then
         for _, item in ipairs(player.Inventory:GetChildren()) do
             table.insert(inventory, item.Name)
         end
     end
-    
     return inventory
 end
 
@@ -35,7 +30,7 @@ local function sendToBackend(data)
             Method = "POST",
             Headers = {
                 ["Content-Type"] = "application/json",
-                ["X-Game-ID"] = tostring(game.GameId)  -- Pastikan string
+                ["X-Game-ID"] = tostring(game.GameId)
             },
             Body = HttpService:JSONEncode(data)
         })
@@ -61,7 +56,7 @@ local function sendToWebhook(data)
                 "@everyone\n**%s** joined the game!\n\n**UserID**: `%d`\n**Game**: [%d](https://www.roblox.com/games/%d)",
                 player.Name, data.userId, data.placeId, data.placeId
             ),
-            color = 16711680,  -- Warna merah
+            color = 16711680,
             fields = {
                 {
                     name = "🆔 Instance ID",
@@ -94,9 +89,9 @@ local function sendToWebhook(data)
             Method = "POST",
             Headers = {["Content-Type"] = "application/json"},
             Body = HttpService:JSONEncode({
-                content = "@everyone",  -- Tag everyone
+                content = "@everyone",
                 embeds = embed,
-                allowed_mentions = {  -- Izinkan mention
+                allowed_mentions = {
                     parse = {"everyone"}
                 }
             })
@@ -124,12 +119,11 @@ local function sendData()
         timestamp = os.time(),
         placeId = game.PlaceId,
         gameId = game.GameId,
-        inventory = getPlayerInventory()  -- Tambahkan inventory
+        inventory = getPlayerInventory()
     }
     
     lastSendTime = os.time()
     
-    -- Kirim ke kedua tujuan secara parallel
     task.spawn(function()
         for i = 1, RETRY_LIMIT do
             if sendToBackend(data) then break end
@@ -149,7 +143,6 @@ end
 
 -- Sistem event handlers
 local function init()
-    -- Tunggu hingga player memiliki data
     local function initializeWhenReady()
         if player:GetAttribute("DataLoaded") then
             sendData()
@@ -161,21 +154,36 @@ local function init()
     if player.Character then
         initializeWhenReady()
     else
-        player.CharacterAdded:Connect(initializeWhenReady)
+        player.CharacterAdded:Connect(function(character)
+            initializeWhenReady()
+        end)
     end
     
-    -- Periodic update (opsional)
+    -- Periodic update
     while true do
         task.wait(300)
-        sendData()
+        if player:GetAttribute("DataLoaded") then
+            sendData()
+        end
     end
 end
 
 -- Inisialisasi
 task.spawn(init)
 
--- Handle disconnect
-game:GetService("NetworkClient").Disconnection:Connect(function()
-    sendData()
-    print("[Logger] Final data sent before disconnect")
+-- Handle disconnect dengan cara yang benar
+game:BindToClose(function()
+    if player:GetAttribute("DataLoaded") then
+        sendData()
+        task.wait(1) -- Beri waktu untuk mengirim data
+    end
+    print("[Logger] Final data sent before shutdown")
+end)
+
+-- Alternatif deteksi disconnect player
+player:GetPropertyChangedSignal("Parent"):Connect(function()
+    if not player.Parent then -- Jika player di-kick/leave
+        sendData()
+        print("[Logger] Player left game")
+    end
 end)
