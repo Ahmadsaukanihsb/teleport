@@ -3,13 +3,20 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
-local BACKEND_URL = "https://backend-tau-three-32.vercel.app/api/instanceUser"
+local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/register.js"  -- Penyesuaian endpoint
 local RETRY_LIMIT = 5
 local RETRY_DELAY = 3
+local DEBOUNCE_TIME = 30  -- Cooldown 30 detik antara pengiriman
+
+local lastSendTime = 0
 
 local function postData(data)
     local jsonData = HttpService:JSONEncode(data)
-    local headers = {["Content-Type"] = "application/json"}
+    local headers = {
+        ["Content-Type"] = "application/json",
+        ["X-Game-Id"] = tostring(game.GameId)  -- Header tambahan
+    }
+    
     for i = 1, RETRY_LIMIT do
         local success, response = pcall(function()
             return HttpService:RequestAsync({
@@ -19,11 +26,19 @@ local function postData(data)
                 Body = jsonData
             })
         end)
-        if success and response.StatusCode >= 200 and response.StatusCode < 300 then
-            print("[Logger] Sent data to backend")
-            return true
+        
+        if success then
+            if response.StatusCode == 200 then
+                print("[Logger] Data sent successfully")
+                return true
+            else
+                warn("[Logger] Server returned status:", response.StatusCode)
+            end
         else
-            warn("[Logger] Failed attempt "..i..", retrying...")
+            warn("[Logger] Request failed:", response)
+        end
+        
+        if i < RETRY_LIMIT then
             task.wait(RETRY_DELAY)
         end
     end
@@ -31,20 +46,47 @@ local function postData(data)
 end
 
 local function sendLogger()
+    -- Debounce check
+    if os.time() - lastSendTime < DEBOUNCE_TIME then
+        return false
+    end
+    
     local data = {
         username = player.Name,
         userId = player.UserId,
         instanceId = game.JobId,
-        timestamp = os.time()
+        timestamp = os.time(),
+        placeId = game.PlaceId,
+        gameId = game.GameId
     }
+    
+    lastSendTime = os.time()
     return postData(data)
 end
 
--- Kirim data saat karakter siap
-if player.Character and player.Character.PrimaryPart then
-    sendLogger()
+-- Sistem pengiriman yang lebih robust
+local function initLogger()
+    -- Kirim saat pertama kali
+    task.spawn(sendLogger)
+    
+    -- Kirim ulang setiap 5 menit (opsional)
+    while true do
+        task.wait(300)
+        task.spawn(sendLogger)
+    end
+end
+
+-- Inisialisasi
+if player.Character then
+    task.spawn(initLogger)
 else
     player.CharacterAdded:Connect(function()
-        sendLogger()
+        task.spawn(initLogger)
     end)
 end
+
+-- Reconnect handling
+game:GetService("NetworkClient").Disconnection:Connect(function()
+    warn("[Logger] Disconnected, sending final log")
+    sendLogger()
+end)
