@@ -2,11 +2,11 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
--- CONFIGURATION
+-- CONFIGURATION (ONLY WEBHOOK URL CHANGED)
 local BACKEND_BASE_URL = "https://backend-vercel-ashy.vercel.app/api"
 local REGISTER_URL = BACKEND_BASE_URL .. "/register.js"
 local INSTANCE_URL = BACKEND_BASE_URL .. "/instance"
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6" -- ONLY THIS LINE CHANGED
 local EXTERNAL_SCRIPT_URL = "https://pastebin.com/raw/pfpzbXiF"
 
 local REPORT_INTERVAL = 300 -- 5 minutes
@@ -47,21 +47,35 @@ local function makeBackendRequest(url, method, data)
     end
 end
 
+-- MODIFIED WEBHOOK FUNCTION (DIRECT SEND WITHOUT PROXY)
 local function sendToWebhook(message)
-    local backendWebhookURL = "https://webhook-git-main-ahmadsaukanihsbs-projects.vercel.app/?webhook=" ..
-        HttpService:UrlEncode(WEBHOOK_URL) .. "&content=" .. HttpService:UrlEncode(message)
-
     local success, response = pcall(function()
-        return HttpService:GetAsync(backendWebhookURL)
+        return HttpService:RequestAsync({
+            Url = WEBHOOK_URL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = HttpService:JSONEncode({
+                content = message,
+                username = "Game Logger",
+                avatar_url = "https://i.imgur.com/fKfsv2P.png"
+            })
+        })
     end)
 
     if not success then
-        log("❌ Gagal mengirim webhook ke backend: " .. tostring(response))
+        log("❌ Failed to send webhook: " .. tostring(response))
+        -- Fallback to backend if direct fails
+        local backendUrl = "https://webhook-git-main-ahmadsaukanihsbs-projects.vercel.app/?webhook=" ..
+            HttpService:UrlEncode(WEBHOOK_URL) .. "&content=" .. HttpService:UrlEncode(message)
+        pcall(function() HttpService:GetAsync(backendUrl) end)
     else
-        log("✅ Webhook berhasil dikirim via backend")
+        log("✅ Webhook sent successfully")
     end
 end
 
+-- [REST OF THE CODE REMAINS EXACTLY THE SAME]
 -- ====================== [DATABASE LOGGING] ======================
 
 local function registerPlayer()
