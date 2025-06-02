@@ -10,6 +10,7 @@ local RETRY_DELAY = 2
 local DEBOUNCE_TIME = 30
 
 local lastSendTime = 0
+local isSending = false
 
 -- Fungsi untuk mendapatkan inventory player
 local function getPlayerInventory()
@@ -22,96 +23,13 @@ local function getPlayerInventory()
     return inventory
 end
 
--- Fungsi untuk mengirim ke backend Vercel
-local function sendToBackend(data)
-    local success, response = pcall(function()
-        return HttpService:RequestAsync({
-            Url = BACKEND_URL,
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json",
-                ["X-Game-ID"] = tostring(game.GameId)
-            },
-            Body = HttpService:JSONEncode(data)
-        })
-    end)
-    
-    if not success then
-        warn("[Backend] Request failed:", response)
-        return false
-    end
-    
-    return response.StatusCode == 200
-end
-
--- Fungsi untuk mengirim ke webhook (Discord)
-local function sendToWebhook(data)
-    local inventory = getPlayerInventory()
-    local inventoryText = #inventory > 0 and table.concat(inventory, ", ") or "Empty"
-    
-    local embed = {
-        {
-            title = "📢 PLAYER JOINED - @"..player.Name,
-            description = string.format(
-                "@everyone\n**%s** joined the game!\n\n**UserID**: `%d`\n**Game**: [%d](https://www.roblox.com/games/%d)",
-                player.Name, data.userId, data.placeId, data.placeId
-            ),
-            color = 16711680,
-            fields = {
-                {
-                    name = "🆔 Instance ID",
-                    value = "`"..data.instanceId.."`",
-                    inline = true
-                },
-                {
-                    name = "🕒 Timestamp",
-                    value = os.date("%Y-%m-%d %H:%M:%S", data.timestamp),
-                    inline = true
-                },
-                {
-                    name = "🎒 Inventory",
-                    value = "```"..inventoryText.."```",
-                    inline = false
-                }
-            },
-            footer = {
-                text = "🔔 Tracker System | "..os.date("%X")
-            },
-            thumbnail = {
-                url = string.format("https://www.roblox.com/headshot-thumbnail/image?userId=%d&width=420&height=420&format=png", data.userId)
-            }
-        }
-    }
-    
-    local success, response = pcall(function()
-        return HttpService:RequestAsync({
-            Url = WEBHOOK_URL,
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = HttpService:JSONEncode({
-                content = "@everyone",
-                embeds = embed,
-                allowed_mentions = {
-                    parse = {"everyone"}
-                }
-            })
-        })
-    end)
-    
-    if not success then
-        warn("[Webhook] Request failed:", response)
-        return false
-    end
-    
-    return response.StatusCode == 204
-end
-
--- Fungsi utama dengan retry mechanism
+-- Fungsi untuk mengirim data
 local function sendData()
-    if os.time() - lastSendTime < DEBOUNCE_TIME then
+    if isSending or (os.time() - lastSendTime < DEBOUNCE_TIME) then
         return false
     end
-    
+
+    isSending = true
     local data = {
         username = player.Name,
         userId = player.UserId,
@@ -121,69 +39,118 @@ local function sendData()
         gameId = game.GameId,
         inventory = getPlayerInventory()
     }
-    
+
     lastSendTime = os.time()
-    
+
+    -- Kirim ke backend
     task.spawn(function()
         for i = 1, RETRY_LIMIT do
-            if sendToBackend(data) then break end
+            local success = pcall(function()
+                HttpService:RequestAsync({
+                    Url = BACKEND_URL,
+                    Method = "POST",
+                    Headers = {
+                        ["Content-Type"] = "application/json",
+                        ["X-Game-ID"] = tostring(game.GameId)
+                    },
+                    Body = HttpService:JSONEncode(data)
+                })
+            end)
+            if success then break end
             if i < RETRY_LIMIT then task.wait(RETRY_DELAY) end
         end
     end)
-    
+
+    -- Kirim ke webhook Discord
     task.spawn(function()
+        local inventoryText = #data.inventory > 0 and table.concat(data.inventory, ", ") or "Empty"
+        local embed = {
+            {
+                title = "📢 PLAYER LOG - @"..player.Name,
+                description = string.format(
+                    "@everyone\n**%s** activity update\n\n**UserID**: `%d`\n**Game**: [%d](https://www.roblox.com/games/%d)",
+                    player.Name, data.userId, data.placeId, data.placeId
+                ),
+                color = 16711680,
+                fields = {
+                    {
+                        name = "🆔 Instance ID",
+                        value = "`"..data.instanceId.."`",
+                        inline = true
+                    },
+                    {
+                        name = "🎒 Inventory",
+                        value = "```"..inventoryText.."```",
+                        inline = false
+                    }
+                },
+                footer = {
+                    text = "🔔 Tracker System | "..os.date("%X")
+                },
+                thumbnail = {
+                    url = string.format("https://www.roblox.com/headshot-thumbnail/image?userId=%d&width=420&height=420&format=png", data.userId)
+                }
+            }
+        }
+
         for i = 1, RETRY_LIMIT do
-            if sendToWebhook(data) then break end
+            local success = pcall(function()
+                HttpService:RequestAsync({
+                    Url = WEBHOOK_URL,
+                    Method = "POST",
+                    Headers = {["Content-Type"] = "application/json"},
+                    Body = HttpService:JSONEncode({
+                        content = "@everyone",
+                        embeds = embed,
+                        allowed_mentions = { parse = {"everyone"} }
+                    })
+                })
+            end)
+            if success then break end
             if i < RETRY_LIMIT then task.wait(RETRY_DELAY) end
         end
     end)
-    
+
+    isSending = false
     return true
 end
 
--- Sistem event handlers
-local function init()
-    local function initializeWhenReady()
-        if player:GetAttribute("DataLoaded") then
-            sendData()
-        else
-            player:GetAttributeChangedSignal("DataLoaded"):Once(sendData)
-        end
-    end
+-- Deteksi player leave (LocalScript compatible)
+local function onPlayerRemoving()
+    sendData()
+    print("[Logger] Player leaving, sending final data")
+end
 
-    if player.Character then
-        initializeWhenReady()
-    else
-        player.CharacterAdded:Connect(function(character)
-            initializeWhenReady()
-        end)
-    end
-    
-    -- Periodic update
-    while true do
-        task.wait(300)
-        if player:GetAttribute("DataLoaded") then
-            sendData()
-        end
-    end
+-- Deteksi character remove (saat respawn/died)
+local function onCharacterRemoved()
+    sendData()
+    print("[Logger] Character removed, sending update")
 end
 
 -- Inisialisasi
-task.spawn(init)
-
--- Handle disconnect dengan cara yang benar
-game:BindToClose(function()
-    if player:GetAttribute("DataLoaded") then
+local function init()
+    -- Setup event listeners
+    player.CharacterAdded:Connect(function(character)
+        character:WaitForChild("Humanoid").Died:Connect(onCharacterRemoved)
         sendData()
-        task.wait(1) -- Beri waktu untuk mengirim data
-    end
-    print("[Logger] Final data sent before shutdown")
-end)
+    end)
 
--- Alternatif deteksi disconnect player
-player:GetPropertyChangedSignal("Parent"):Connect(function()
-    if not player.Parent then -- Jika player di-kick/leave
+    if player.Character then
+        player.Character:FindFirstChildOfClass("Humanoid").Died:Connect(onCharacterRemoved)
         sendData()
-        print("[Logger] Player left game")
     end
-end)
+
+    -- Periodic update setiap 5 menit
+    while true do
+        task.wait(300)
+        sendData()
+    end
+end
+
+-- Mulai sistem
+init()
+
+-- Backup: Deteksi game close (untuk Studio testing)
+if RunService:IsStudio() then
+    game:GetService("TestService"):Message("Logger system initialized")
+end
