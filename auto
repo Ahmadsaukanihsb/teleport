@@ -1,186 +1,194 @@
+-- Enhanced Roblox Auto Joiner for Delta Executor
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
-local TextChatService = game:GetService("TextChatService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
--- Config
-local REDIS_API_URL = "https://54bd-2001-448a-106e-4be8-56bb-76c9-5288-28b1.ngrok-free.app"
-local PLACE_ID = 126884695634066
-local CHECK_INTERVAL = 15
-local MAX_CHAT_PER_INSTANCE = 3
-local TELEPORT_COOLDOWN = 30
-local CHAT_MESSAGE = "Hello from Roblox!"
-local CHAT_RADIUS = 20 -- radius dalam studs untuk deteksi player lain
+-- CONFIGURATION
+local API_URL = "https://backend-vercel-ashy.vercel.app/check.js"  -- Your backend endpoint
+local CHECK_INTERVAL = 10  -- Seconds between instance checks
+local CHAT_INTERVAL = 30  -- Seconds between chat messages
+local PROXIMITY_RADIUS = 20  -- Studs
+local DEBUG_MODE = true
 
--- Local storage
-local instanceChatCounts = {}
-local lastTeleportAttempt = 0
+-- Database of usernames (you can fetch this from your backend if needed)
+local DATABASE_USERS = {
+    "Player1",
+    "Player2",
+    "Player3"
+}
 
--- Helpers
-local function parseJsonSafely(jsonStr)
-    local success, result = pcall(function()
-        return HttpService:JSONDecode(jsonStr)
-    end)
-    return success and result or nil
+-- Global variables
+local lastInstanceId = nil
+local isChatting = false
+local shouldStopChatting = false
+local connection = nil
+
+-- Debug logging
+local function log(message)
+    if DEBUG_MODE then
+        print("[AutoJoiner] " .. message)
+    end
 end
 
-local function makeHttpRequest(method, endpoint, body)
-    local url = REDIS_API_URL .. endpoint
-    local headers = {
-        ["Content-Type"] = "application/json",
-        ["ngrok-skip-browser-warning"] = "true"
-    }
-    local requestBody = body and HttpService:JSONEncode(body) or nil
-
-    local success, response = pcall(function()
-        return HttpService:RequestAsync({
-            Url = url,
-            Method = method,
-            Headers = headers,
-            Body = requestBody,
-        })
-    end)
-
-    if not success then
-        warn("HTTP request failed:", response)
-        return nil
-    end
-
-    print("HTTP", response.StatusCode, endpoint)
-    if response.StatusCode >= 400 then
-        print("Response Body:", response.Body)
-    end
-    return response
-end
-
-local function fetchWithRetry(method, endpoint, body, maxRetries)
-    local retries = 0
-    while retries < (maxRetries or 3) do
-        local res = makeHttpRequest(method, endpoint, body)
-        if res and res.StatusCode == 200 then
-            return res
+-- Check if player is in database
+local function isInDatabase(username)
+    for _, dbUser in pairs(DATABASE_USERS) do
+        if string.lower(tostring(dbUser)) == string.lower(tostring(username)) then
+            return true
         end
-        retries += 1
-        task.wait(2 ^ retries)
     end
-    return nil
+    return false
 end
 
--- Fungsi ini sudah tidak dipakai, jadi dihapus atau dikomentari
--- local function updateUserInstance()
---     -- Tidak mengirim instance ke server
--- end
-
-local function isValidInstanceId(instanceId)
-    return instanceId and typeof(instanceId) == "string"
-           and #instanceId > 10
-           and instanceId ~= game.JobId
-end
-
-local function safeTeleport(instanceId)
-    if os.time() - lastTeleportAttempt < TELEPORT_COOLDOWN then
-        print("Teleport cooldown...")
-        return false
-    end
-
-    lastTeleportAttempt = os.time()
-    local success, err = pcall(function()
-        local accessCode = tostring(math.random(10000, 99999))
-        TeleportService:TeleportToPlaceInstance(PLACE_ID, instanceId, Players.LocalPlayer, {
-            reservedServerAccessCode = accessCode
-        })
-    end)
-
-    if not success then
-        warn("Teleport failed:", err)
-        return false
-    end
-
-    task.wait(10)
-    return true
-end
-
-local function handleTeleportLogic(targetInstance)
-    if not isValidInstanceId(targetInstance) then
-        warn("Invalid target instance:", targetInstance)
-        return false
-    end
-
-    print("🔄 Instance berbeda, teleporting ke", targetInstance)
-    if instanceChatCounts[game.JobId] then
-        instanceChatCounts[game.JobId] = nil
-    end
-
-    return safeTeleport(targetInstance)
-end
-
--- Fungsi tambahan untuk cek player sekitar sebelum chat
-local function isPlayerNearby()
+-- Check for nearby players
+local function checkProximity()
     local localPlayer = Players.LocalPlayer
-    local character = localPlayer.Character
-    if not character or not character.PrimaryPart then
-        return false
-    end
-    local localPos = character.PrimaryPart.Position
-
+    if not localPlayer or not localPlayer.Character then return false end
+    
+    local localRoot = localPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not localRoot then return false end
+    
     for _, player in pairs(Players:GetPlayers()) do
-        if player ~= localPlayer and player.Character and player.Character.PrimaryPart then
-            local otherPos = player.Character.PrimaryPart.Position
-            local distance = (localPos - otherPos).Magnitude
-            if distance <= CHAT_RADIUS then
-                return true
+        if player ~= localPlayer and player.Character then
+            local char = player.Character
+            local root = char:FindFirstChild("HumanoidRootPart")
+            
+            if root then
+                local distance = (localRoot.Position - root.Position).Magnitude
+                if distance <= PROXIMITY_RADIUS then
+                    return true
+                end
             end
         end
     end
     return false
 end
 
-local function handleChatLogic(instanceId, userId)
-    if isPlayerNearby() then
-        print("🚫 Player lain di sekitar, chat dibatalkan")
-        return
+-- Send chat message
+local function sendChatMessage(message)
+    if not ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents") then return end
+    
+    local chatEvents = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+    local sayMessageRequest = chatEvents:FindFirstChild("SayMessageRequest")
+    
+    if sayMessageRequest then
+        sayMessageRequest:FireServer(message, "All")
     end
+end
 
-    local chatCount = instanceChatCounts[instanceId] or 0
-    if chatCount >= MAX_CHAT_PER_INSTANCE then
-        print("🚫 Batas chat tercapai untuk instance ini")
-        return
-    end
-
-    pcall(function()
-        TextChatService.TextChannels.RBXGeneral:SendAsync(CHAT_MESSAGE)
-        instanceChatCounts[instanceId] = chatCount + 1
-        print("💬 Mengirim chat (", instanceChatCounts[instanceId], "/", MAX_CHAT_PER_INSTANCE, ")")
+-- Chat loop
+local function startChatLoop()
+    if isChatting then return end
+    
+    isChatting = true
+    shouldStopChatting = false
+    
+    spawn(function()
+        while isChatting and not shouldStopChatting do
+            if checkProximity() then
+                log("Player detected nearby - stopping chat")
+                shouldStopChatting = true
+                break
+            end
+            
+            sendChatMessage("Hello from auto joiner!")
+            wait(CHAT_INTERVAL)
+        end
+        isChatting = false
     end)
 end
 
+-- Get latest instance from backend
+local function getLatestInstance()
+    local success, response = pcall(function()
+        return HttpService:GetAsync(API_URL, false)
+    end)
+    
+    if success then
+        local data = HttpService:JSONDecode(response)
+        if data and data.instanceId then
+            return data.instanceId
+        end
+    end
+    return nil
+end
+
+-- Teleport to instance
+local function teleportToInstance(instanceId)
+    local localPlayer = Players.LocalPlayer
+    if not localPlayer then return false end
+    
+    local success, result = pcall(function()
+        TeleportService:TeleportToPlaceInstance(
+            game.PlaceId,
+            instanceId,
+            localPlayer
+        )
+    end)
+    
+    if not success then
+        log("Teleport failed: " .. tostring(result))
+    end
+    return success
+end
+
 -- Main loop
-local function main()
-    while task.wait(CHECK_INTERVAL) do
-        -- Tidak lagi mengirim instance ke server, jadi hapus updateUserInstance
-        -- if not updateUserInstance() then continue end
-
-        local userId = Players.LocalPlayer.UserId
-        local res = fetchWithRetry("GET", "/api/getInstanceId?userId="..userId, nil, 5)
-        if not res or res.StatusCode ~= 200 then
-            warn("Gagal mendapatkan instanceId dari server")
-            continue
+local function mainLoop()
+    log("Starting main loop...")
+    
+    while true do
+        -- Check current players for database matches
+        for _, player in pairs(Players:GetPlayers()) do
+            if isInDatabase(player.Name) and not isChatting then
+                log("Found database player: " .. player.Name)
+                startChatLoop()
+                break
+            end
         end
-
-        local data = parseJsonSafely(res.Body)
-        if not data or not data.success then
-            warn("Gagal parsing data instanceId:", res.Body)
-            continue
+        
+        -- Check for new instance
+        local currentInstanceId = getLatestInstance()
+        if currentInstanceId and currentInstanceId ~= lastInstanceId then
+            log("New instance detected: " .. currentInstanceId)
+            lastInstanceId = currentInstanceId
+            teleportToInstance(currentInstanceId)
         end
-
-        if isValidInstanceId(data.instanceId) and data.instanceId ~= game.JobId then
-            handleTeleportLogic(data.instanceId)
-        else
-            handleChatLogic(game.JobId, userId)
-        end
+        
+        wait(CHECK_INTERVAL)
     end
 end
 
--- Start system
-print("✅ Sistem auto-joiner dimulai")
-task.spawn(main)
+-- Initialize
+local function init()
+    log("Initializing auto joiner...")
+    
+    -- Get initial instance
+    lastInstanceId = getLatestInstance()
+    if lastInstanceId then
+        log("Current instance: " .. lastInstanceId)
+    else
+        log("Failed to get initial instance")
+    end
+    
+    -- Start main loop
+    connection = RunService.Heartbeat:Connect(function()
+        pcall(mainLoop)
+    end)
+end
+
+-- Start the script
+init()
+
+-- Cleanup on script termination
+game:GetService("UserInputService").InputEnded:Connect(function(input, processed)
+    if input.KeyCode == Enum.KeyCode.End then  -- Press End key to stop
+        if connection then
+            connection:Disconnect()
+            log("Script terminated")
+        end
+    end
+end)
+
+log("Auto joiner script loaded. Press End to stop.")
