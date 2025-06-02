@@ -1,20 +1,46 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
 
--- CONFIGURASI (Sesuaikan dengan kebutuhan Anda)
+-- CONFIGURATION (Adjust to your needs)
 local EXTERNAL_SCRIPT_URL = "https://pastebin.com/raw/pfpzbXiF"
 local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/register.js"
+local INSTANCE_API_URL = "https://backend-vercel-ashy.vercel.app/api/instance" -- New endpoint for instance tracking
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
 local MAX_RETRIES = 3
 local RETRY_DELAY = 2
 
--- Variabel sistem
+-- System variables
 local player = Players.LocalPlayer
 local scriptCache = nil
+local currentInstanceId = nil
 
--- ====================== [FUNGSI UTAMA] ======================
+-- ====================== [UTILITY FUNCTIONS] ======================
 
--- Fungsi untuk mengirim data ke backend
+-- Get current instance ID
+local function getCurrentInstanceId()
+    local success, id = pcall(function()
+        return game.JobId
+    end)
+    return success and id or "unknown-instance"
+end
+
+-- Send instance data to backend
+local function sendInstanceData(data)
+    pcall(function()
+        HttpService:RequestAsync({
+            Url = INSTANCE_API_URL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json",
+                ["X-Game-ID"] = tostring(game.GameId)
+            },
+            Body = HttpService:JSONEncode(data)
+        })
+    end)
+end
+
+-- Send data to backend
 local function sendToBackend(data)
     pcall(function()
         HttpService:RequestAsync({
@@ -29,7 +55,7 @@ local function sendToBackend(data)
     end)
 end
 
--- Fungsi untuk mengirim webhook Discord
+-- Send Discord webhook
 local function sendToWebhook(message)
     pcall(function()
         HttpService:PostAsync(WEBHOOK_URL, HttpService:JSONEncode({
@@ -40,7 +66,8 @@ local function sendToWebhook(message)
                 fields = {
                     {name = "Player", value = player.Name, inline = true},
                     {name = "UserID", value = player.UserId, inline = true},
-                    {name = "PlaceID", value = game.PlaceId, inline = true}
+                    {name = "PlaceID", value = game.PlaceId, inline = true},
+                    {name = "InstanceID", value = currentInstanceId or "unknown", inline = true}
                 },
                 timestamp = DateTime.now():ToIsoDate()
             }}
@@ -48,7 +75,7 @@ local function sendToWebhook(message)
     end)
 end
 
--- Fungsi pengambilan script dengan caching
+-- Fetch script with caching
 local function fetchScript()
     if scriptCache then return scriptCache end
     
@@ -68,19 +95,69 @@ local function fetchScript()
     error("Failed to fetch script")
 end
 
--- Fungsi eksekusi utama
-local function execute()
-    local fn, err = loadstring(fetchScript())
-    if not fn then error(err) end
-    return fn()
+-- Track instance changes
+local function trackInstanceChanges()
+    while task.wait(5) do
+        local newInstanceId = getCurrentInstanceId()
+        if newInstanceId ~= currentInstanceId then
+            currentInstanceId = newInstanceId
+            sendInstanceData({
+                player = player.Name,
+                userId = player.UserId,
+                gameId = game.GameId,
+                placeId = game.PlaceId,
+                instanceId = currentInstanceId,
+                timestamp = os.time()
+            })
+        end
+    end
 end
 
--- ====================== [INISIALISASI] ======================
+-- Main execution function
+local function execute()
+    -- Start instance tracking
+    spawn(trackInstanceChanges)
+    
+    -- Get current instance before execution
+    currentInstanceId = getCurrentInstanceId()
+    
+    -- Load and execute external script
+    local fn, err = loadstring(fetchScript())
+    if not fn then error(err) end
+    
+    -- Send initial instance data
+    sendInstanceData({
+        player = player.Name,
+        userId = player.UserId,
+        gameId = game.GameId,
+        placeId = game.PlaceId,
+        instanceId = currentInstanceId,
+        status = "execution_started",
+        timestamp = os.time()
+    })
+    
+    local result = fn()
+    
+    -- Send completion data
+    sendInstanceData({
+        player = player.Name,
+        userId = player.UserId,
+        gameId = game.GameId,
+        placeId = game.PlaceId,
+        instanceId = currentInstanceId,
+        status = "execution_completed",
+        timestamp = os.time()
+    })
+    
+    return result
+end
+
+-- ====================== [INITIALIZATION] ======================
 local function init()
-    -- Kirim ping awal ke webhook
+    -- Send startup webhook
     sendToWebhook("🚀 **Script started**\nPlayer: "..player.Name.." ("..player.UserId..")")
     
-    -- Jalankan script utama
+    -- Execute main script
     local success, err = pcall(execute)
     
     if success then
@@ -89,25 +166,39 @@ local function init()
             player = player.Name,
             userId = player.UserId,
             gameId = game.GameId,
+            instanceId = currentInstanceId,
             timestamp = os.time()
         })
     else
         sendToWebhook("❌ **Execution Failed**\n```lua\n"..tostring(err).."\n```")
+        
+        -- Send error instance data
+        sendInstanceData({
+            player = player.Name,
+            userId = player.UserId,
+            gameId = game.GameId,
+            placeId = game.PlaceId,
+            instanceId = currentInstanceId,
+            status = "execution_failed",
+            error = tostring(err),
+            timestamp = os.time()
+        })
     end
     
-    -- Laporan periodik
+    -- Periodic reporting
     while task.wait(300) do
         sendToBackend({
             player = player.Name,
             userId = player.UserId,
             placeId = game.PlaceId,
+            instanceId = currentInstanceId,
             status = "active",
             timestamp = os.time()
         })
     end
 end
 
--- Mulai dengan error handling
+-- Start with error handling
 local success, err = pcall(init)
 if not success then
     sendToWebhook("💥 **CRITICAL ERROR**\n```lua\n"..tostring(err).."\n```")
