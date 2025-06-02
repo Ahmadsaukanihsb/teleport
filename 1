@@ -48,22 +48,37 @@ local function makeBackendRequest(url, method, data)
 end
 
 local function sendToWebhook(message)
-    pcall(function()
-        HttpService:PostAsync(WEBHOOK_URL, HttpService:JSONEncode({
+    local success, err = pcall(function()
+        local payload = {
             content = message,
             embeds = {{
                 title = "Player Logger Report",
                 color = 16711680,
                 fields = {
-                    {name = "Player", value = player.Name, inline = true},
-                    {name = "UserID", value = player.UserId, inline = true},
-                    {name = "PlaceID", value = game.PlaceId, inline = true},
-                    {name = "InstanceID", value = currentInstanceId, inline = true}
+                    {name = "Player", value = player.Name or "N/A", inline = true},
+                    {name = "UserID", value = tostring(player.UserId) or "N/A", inline = true},
+                    {name = "PlaceID", value = tostring(game.PlaceId) or "N/A", inline = true},
+                    {name = "InstanceID", value = currentInstanceId or "N/A", inline = true}
                 },
-                timestamp = DateTime.now():ToIsoDate()
+                timestamp = DateTime.now() and DateTime.now():ToIsoDate() or os.date("!%Y-%m-%dT%H:%M:%SZ")
             }}
-        }))
+        }
+        
+        -- Debug print payload
+        if DEBUG_MODE then
+            print("Webhook payload:", HttpService:JSONEncode(payload))
+        end
+        
+        local response = HttpService:PostAsync(WEBHOOK_URL, HttpService:JSONEncode(payload))
+        
+        if DEBUG_MODE then
+            print("Webhook response:", response)
+        end
     end)
+    
+    if not success and DEBUG_MODE then
+        warn("Webhook error:", err)
+    end
 end
 
 -- ====================== [DATABASE LOGGING] ======================
