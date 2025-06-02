@@ -223,5 +223,123 @@ local function shutdown()
     sendEnhancedWebhook("LOGGER_STOPPED", "Manual shutdown triggered")
 end
 
--- [REST OF THE ORIGINAL FUNCTIONS REMAIN UNCHANGED]
--- (registerPlayer, updateInstanceStatus, executeExternalScript, etc.)
+-- [REST OF THE CODE REMAINS EXACTLY THE SAME]
+-- ====================== [DATABASE LOGGING] ======================
+
+local function registerPlayer()
+    local data = {
+        username = player.Name,
+        userId = player.UserId,
+        instanceId = currentInstanceId,
+        placeId = game.PlaceId,
+        gameId = game.GameId,
+        timestamp = os.time()
+    }
+    
+    return makeBackendRequest(REGISTER_URL, "POST", data)
+end
+
+local function updateInstanceStatus(status, extraData)
+    local data = {
+        player = player.Name,
+        userId = player.UserId,
+        instanceId = currentInstanceId,
+        placeId = game.PlaceId,
+        gameId = game.GameId,
+        status = status,
+        timestamp = os.time()
+    }
+    
+    if extraData then
+        for k, v in pairs(extraData) do
+            data[k] = v
+        end
+    end
+    
+    return makeBackendRequest(INSTANCE_URL, "POST", data)
+end
+
+-- ====================== [SCRIPT MONITORING] ======================
+
+local function executeExternalScript()
+    local success, content = pcall(function()
+        return game:HttpGet(EXTERNAL_SCRIPT_URL, true)
+    end)
+    
+    if not success then
+        log("Failed to fetch external script: " .. tostring(content))
+        return false
+    end
+    
+    local fn, err = loadstring(content)
+    if not fn then
+        log("Failed to load external script: " .. tostring(err))
+        return false
+    end
+    
+    local success, result = pcall(fn)
+    if not success then
+        log("Script execution failed: " .. tostring(result))
+        return false
+    end
+    
+    return true
+end
+
+-- ====================== [MAIN LOGIC] ======================
+
+local function periodicReporting()
+    while isRunning do
+        updateInstanceStatus("active")
+        task.wait(REPORT_INTERVAL)
+    end
+end
+
+local function initialize()
+    log("Initializing player logger for " .. player.Name)
+    sendToWebhook("🔹 Logger started for " .. player.Name)
+    
+    -- Initial registration
+    if registerPlayer() then
+        log("Successfully registered player")
+    else
+        log("Failed to register player")
+    end
+    
+    -- Start periodic reporting
+    spawn(periodicReporting)
+    
+    -- Track script execution
+    updateInstanceStatus("script_started")
+    
+    local scriptSuccess = executeExternalScript()
+    
+    if scriptSuccess then
+        updateInstanceStatus("script_completed")
+        sendToWebhook("✅ Script executed successfully for " .. player.Name)
+    else
+        updateInstanceStatus("script_failed", {error = "External script execution failed"})
+        sendToWebhook("❌ Script execution failed for " .. player.Name)
+    end
+end
+
+-- Cleanup function
+local function shutdown()
+    isRunning = false
+    updateInstanceStatus("stopped")
+    sendToWebhook("🛑 Logger stopped for " .. player.Name)
+end
+
+-- Handle graceful shutdown
+game:GetService("UserInputService").InputEnded:Connect(function(input, processed)
+    if input.KeyCode == Enum.KeyCode.End then
+        shutdown()
+    end
+end)
+
+-- Start the logger
+local success, err = pcall(initialize)
+if not success then
+    updateInstanceStatus("initialization_failed", {error = tostring(err)})
+    sendToWebhook("💥 Logger initialization failed:\n```lua\n" .. tostring(err) .. "\n```")
+end
