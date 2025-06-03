@@ -110,7 +110,7 @@ local function createRichEmbed(data, messageType)
         title = "📊 "..messageType.." | "..data.player.username,
         color = 0x3498db,
         fields = {},
-        timestamp = DateTime.fromUnixTimestamp(data.instance.serverTime):ToIsoDate(),
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ", data.instance.serverTime),
         footer = {
             text = "Instance ID: "..data.instance.jobId
         }
@@ -120,7 +120,7 @@ local function createRichEmbed(data, messageType)
     table.insert(embed.fields, {
         name = "👤 Player Info",
         value = string.format(
-            "Display: %s\nUID: %d\nAccount Age: %d days\nMembership: %s",
+            "**Display:** %s\n**UID:** %d\n**Account Age:** %d days\n**Membership:** %s",
             data.player.displayName,
             data.player.userId,
             data.player.accountAge,
@@ -133,7 +133,7 @@ local function createRichEmbed(data, messageType)
     table.insert(embed.fields, {
         name = "🌐 Instance",
         value = string.format(
-            "Place ID: %d\nGame ID: %d\nPlayers: %d/%d",
+            "**Place ID:** %d\n**Game ID:** %d\n**Players:** %d/%d",
             data.instance.placeId,
             data.instance.gameId,
             data.instance.playerCount,
@@ -146,10 +146,12 @@ local function createRichEmbed(data, messageType)
     table.insert(embed.fields, {
         name = "⚔ Character",
         value = string.format(
-            "HP: %.1f/%.1f\nPosition: %s",
+            "**HP:** %.1f/%.1f\n**Position:** (%.2f, %.2f, %.2f)",
             data.character.health,
             data.character.maxHealth,
-            tostring(data.character.position)
+            data.character.position.X,
+            data.character.position.Y,
+            data.character.position.Z
         ),
         inline = false
     })
@@ -158,12 +160,18 @@ local function createRichEmbed(data, messageType)
     if #data.inventory > 0 then
         local inventoryStr = ""
         for _, item in ipairs(data.inventory) do
-            inventoryStr ..= string.format("%s (%s)\n", item.name, item.class)
+            inventoryStr = inventoryStr .. string.format("- %s (%s)\n", item.name, item.class)
         end
         table.insert(embed.fields, {
             name = "🎒 Inventory ("..#data.inventory..")",
             value = inventoryStr,
-            inline = true
+            inline = false
+        })
+    else
+        table.insert(embed.fields, {
+            name = "🎒 Inventory",
+            value = "Empty",
+            inline = false
         })
     end
 
@@ -171,12 +179,12 @@ local function createRichEmbed(data, messageType)
     if next(data.stats) ~= nil then
         local statsStr = ""
         for name, value in pairs(data.stats) do
-            statsStr ..= string.format("%s: %s\n", name, tostring(value))
+            statsStr = statsStr .. string.format("%s: %s\n", name, tostring(value))
         end
         table.insert(embed.fields, {
-            name = "📈 Stats",
+            name = "📈 Leaderstats",
             value = statsStr,
-            inline = true
+            inline = false
         })
     end
 
