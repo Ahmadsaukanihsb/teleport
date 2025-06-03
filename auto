@@ -2,86 +2,46 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 
-local player = Players.LocalPlayer
-local currentInstanceId = game.JobId
-
-local BACKEND_LATEST_USER_URL = "https://backend-vercel-ashy.vercel.app/api/latest-user.js"
-local TARGET_RADIUS = 20
-local CHAT_MESSAGE = "dsadsadas!"
-
-local isChatting = false
-local cachedUsername, cachedInstanceId
-local lastFetch = 0
-local FETCH_COOLDOWN = 15 -- detik
-
-local function httpRequest(url)
-    local success, response = pcall(function()
-        return HttpService:GetAsync(url)
-    end)
-    if success then
-        return { StatusCode = 200, Body = response }
-    else
-        error("Failed to perform HttpService:GetAsync request: " .. tostring(response))
-    end
-end
+local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/latest-user.js"
 
 local function fetchLatestUser()
-    if (tick() - lastFetch) < FETCH_COOLDOWN and cachedInstanceId then
-        return cachedUsername, cachedInstanceId
-    end
-
     local success, response = pcall(function()
-        return httpRequest(BACKEND_LATEST_USER_URL)
+        -- curl GET request via HttpService:GetAsync
+        return HttpService:GetAsync(BACKEND_URL, true)
     end)
-
-    if success and response.StatusCode == 200 then
-        local data = HttpService:JSONDecode(response.Body)
-        cachedUsername = data.username
-        cachedInstanceId = data.instanceId
-        lastFetch = tick()
-        return cachedUsername, cachedInstanceId
+    if success then
+        local data = HttpService:JSONDecode(response)
+        return data.username, data.instanceId
     else
-        warn("Failed to fetch latest user: " .. tostring(response and response.StatusCode or response))
+        warn("Failed to fetch latest user: " .. tostring(response))
         return nil, nil
     end
 end
 
-local function tryChat(targetUsername)
-    if isChatting then return end
-
-    local targetPlayer = Players:FindFirstChild(targetUsername)
-    if not targetPlayer or not targetPlayer.Character or not targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+local function autoJoin()
+    local username, instanceId = fetchLatestUser()
+    if not username or not instanceId then
+        warn("No latest user or instance found.")
         return
     end
 
-    if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+    local localPlayer = Players.LocalPlayer
+    if localPlayer.Name == username then
+        print("You are already in the latest instance.")
         return
     end
 
-    local distance = (player.Character.HumanoidRootPart.Position - targetPlayer.Character.HumanoidRootPart.Position).Magnitude
-
-    if distance <= TARGET_RADIUS then
-        isChatting = true
-        local chatEvent = game:GetService("ReplicatedStorage"):WaitForChild("DefaultChatSystemChatEvents"):WaitForChild("SayMessageRequest")
-        chatEvent:FireServer(CHAT_MESSAGE, "All")
-        task.delay(5, function()
-            isChatting = false
-        end)
+    -- Check if already in that instance
+    if game.JobId == instanceId then
+        print("Already connected to the latest instance.")
+        return
     end
+
+    print(string.format("Teleporting to user %s in instance %s...", username, instanceId))
+
+    -- Teleport to the latest instance
+    TeleportService:TeleportToPlaceInstance(game.PlaceId, instanceId, localPlayer)
 end
 
-task.spawn(function()
-    while true do
-        local targetUsername, targetInstanceId = fetchLatestUser()
-        if targetInstanceId and targetInstanceId ~= currentInstanceId and targetUsername ~= player.Name then
-            print("Teleporting to latest instance:", targetInstanceId, "target username:", targetUsername)
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, targetInstanceId, player)
-            return
-        elseif targetInstanceId == currentInstanceId and targetUsername == player.Name then
-            -- Jangan chat sama diri sendiri
-        elseif targetInstanceId == currentInstanceId then
-            tryChat(targetUsername)
-        end
-        task.wait(10)
-    end
-end)
+-- Run the autoJoin function
+autoJoin()
