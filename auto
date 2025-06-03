@@ -1,46 +1,109 @@
--- [Auto Teleport Script - Delta Executor Friendly]
-
 repeat task.wait() until game:IsLoaded()
 
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
-local currentInstanceId = game.JobId
-local PLACE_ID = game.PlaceId -- atau hardcode jika perlu
-local API_URL = "https://backend-vercel-ashy.vercel.app/api/latest-instance.js"
+local PLACE_ID = game.PlaceId
+local API_BASE = "https://backend-vercel-ashy.vercel.app/api"
 
-local function fetchLatestInstance()
+local CHAT_ENABLED = false
+local CHAT_RADIUS = 20
+local CHECK_INTERVAL = 5
+
+-- UserId target yang kita cari (ganti sesuai user yang mau kamu cek)
+local targetUserId = 123456789
+
+-- Ambil instance user target dari backend (harus ada API yang return instance user berdasarkan userid)
+local function getUserInstance(userId)
+    local url = string.format("%s/user-instance?userid=%d", API_BASE, userId)
     local success, result = pcall(function()
-        return game:HttpGet(API_URL)
+        return game:HttpGet(url)
     end)
+    if not success then
+        warn("Gagal fetch user instance:", result)
+        return nil
+    end
 
-    if success then
-        local ok, json = pcall(function()
-            return HttpService:JSONDecode(result)
-        end)
+    local ok, data = pcall(function()
+        return HttpService:JSONDecode(result)
+    end)
+    if not ok or not data.instanceId then
+        return nil
+    end
+    return data.instanceId
+end
 
-        if ok and json.instanceId then
-            return json.instanceId
+-- Teleport ke server instance user target jika beda instance
+local function teleportToUserInstance(userInstance)
+    if userInstance ~= game.JobId then
+        print("Teleport ke instance user target:", userInstance)
+        TeleportService:TeleportToPlaceInstance(PLACE_ID, userInstance, player)
+        return true
+    end
+    return false
+end
+
+-- Cek jarak player lain ke player lokal
+local function isPlayerNearby(radius)
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local dist = (p.Character.HumanoidRootPart.Position - player.Character.HumanoidRootPart.Position).Magnitude
+            if dist < radius then
+                return true
+            end
         end
     end
-
-    return nil
+    return false
 end
 
-local function checkAndTeleport()
-    local latestInstance = fetchLatestInstance()
-
-    if latestInstance and latestInstance ~= currentInstanceId then
-        warn("🔄 Instance baru ditemukan! Teleporting...")
-        TeleportService:TeleportToPlaceInstance(PLACE_ID, latestInstance, player)
+-- Fungsi untuk mengontrol chat (aktif / stop)
+local function updateChat()
+    -- Logika enable chat kalau syarat terpenuhi
+    if not CHAT_ENABLED then
+        print("Chat dimatikan.")
+        -- Misal disable chat dengan cara stop bind atau clear chat input (tergantung implementasi chat kamu)
+        -- Contoh sederhana:
+        -- game.StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, false)
+        -- Tapi ini non-ideal, kamu bisa ganti sesuai sistem chat
     else
-        print("✅ Instance saat ini masih yang terbaru.")
+        print("Chat diaktifkan.")
+        -- Aktifkan chat kembali
+        -- game.StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, true)
     end
 end
 
--- Loop untuk pengecekan tiap 10 detik
-while task.wait(10) do
-    checkAndTeleport()
+-- Loop utama
+while task.wait(CHECK_INTERVAL) do
+    local userInstance = getUserInstance(targetUserId)
+
+    if userInstance then
+        local teleported = teleportToUserInstance(userInstance)
+        if teleported then
+            -- Teleport akan reload script, so break loop
+            break
+        end
+
+        -- Jika server sama
+        if game.JobId == userInstance then
+            if isPlayerNearby(CHAT_RADIUS) then
+                -- Player dekat, matikan chat
+                CHAT_ENABLED = false
+            else
+                -- Player aman, chat boleh jalan
+                CHAT_ENABLED = true
+            end
+        else
+            -- User tidak di server yang sama, matikan chat
+            CHAT_ENABLED = false
+        end
+
+        updateChat()
+    else
+        warn("User target tidak ditemukan di database.")
+        CHAT_ENABLED = false
+        updateChat()
+    end
 end
