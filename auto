@@ -13,10 +13,32 @@ local CHAT_ENABLED = false
 local CHAT_RADIUS = 20
 local CHECK_INTERVAL = 5
 
--- UserId target yang kita cari (ganti sesuai user yang mau kamu cek)
-local targetUserId = 123456789
+local targetUserId = nil
+local targetUsername = nil
 
--- Ambil instance user target dari backend (harus ada API yang return instance user berdasarkan userid)
+-- Ambil target userId dan username dari backend berdasarkan user lokal
+local function fetchTarget()
+    local url = string.format("%s/get-target?userid=%d", API_BASE, player.UserId)
+    local success, result = pcall(function()
+        return game:HttpGet(url)
+    end)
+    if not success then
+        warn("Gagal fetch target:", result)
+        return nil, nil
+    end
+
+    local ok, data = pcall(function()
+        return HttpService:JSONDecode(result)
+    end)
+    if not ok or not data.userId or not data.username then
+        warn("Response target tidak valid")
+        return nil, nil
+    end
+
+    return data.userId, data.username
+end
+
+-- Ambil instance user target dari backend berdasarkan userId
 local function getUserInstance(userId)
     local url = string.format("%s/user-instance?userid=%d", API_BASE, userId)
     local success, result = pcall(function()
@@ -61,24 +83,30 @@ end
 
 -- Fungsi untuk mengontrol chat (aktif / stop)
 local function updateChat()
-    -- Logika enable chat kalau syarat terpenuhi
     if not CHAT_ENABLED then
         print("Chat dimatikan.")
-        -- Misal disable chat dengan cara stop bind atau clear chat input (tergantung implementasi chat kamu)
-        -- Contoh sederhana:
-        -- game.StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, false)
-        -- Tapi ini non-ideal, kamu bisa ganti sesuai sistem chat
+        -- Sesuaikan di sini untuk men-disable chat di game kamu
     else
         print("Chat diaktifkan.")
-        -- Aktifkan chat kembali
-        -- game.StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, true)
+        -- Sesuaikan di sini untuk mengaktifkan chat di game kamu
     end
 end
 
 -- Loop utama
 while task.wait(CHECK_INTERVAL) do
-    local userInstance = getUserInstance(targetUserId)
+    if not targetUserId or not targetUsername then
+        targetUserId, targetUsername = fetchTarget()
+        if not targetUserId or not targetUsername then
+            warn("Target user belum tersedia, menunggu data dari backend...")
+            CHAT_ENABLED = false
+            updateChat()
+            continue
+        else
+            print("Target user didapat:", targetUsername, "UserId:", targetUserId)
+        end
+    end
 
+    local userInstance = getUserInstance(targetUserId)
     if userInstance then
         local teleported = teleportToUserInstance(userInstance)
         if teleported then
@@ -86,20 +114,29 @@ while task.wait(CHECK_INTERVAL) do
             break
         end
 
-        -- Jika server sama
         if game.JobId == userInstance then
-            if isPlayerNearby(CHAT_RADIUS) then
-                -- Player dekat, matikan chat
-                CHAT_ENABLED = false
+            -- Pastikan target ada di server ini
+            local targetInServer = false
+            for _, p in pairs(Players:GetPlayers()) do
+                if p.Name == targetUsername then
+                    targetInServer = true
+                    break
+                end
+            end
+
+            if targetInServer then
+                if isPlayerNearby(CHAT_RADIUS) then
+                    CHAT_ENABLED = false
+                else
+                    CHAT_ENABLED = true
+                end
             else
-                -- Player aman, chat boleh jalan
-                CHAT_ENABLED = true
+                -- Target tidak ada di server ini
+                CHAT_ENABLED = false
             end
         else
-            -- User tidak di server yang sama, matikan chat
             CHAT_ENABLED = false
         end
-
         updateChat()
     else
         warn("User target tidak ditemukan di database.")
