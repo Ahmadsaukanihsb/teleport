@@ -7,24 +7,31 @@ local currentInstanceId = game.JobId
 
 local BACKEND_LATEST_USER_URL = "https://backend-vercel-ashy.vercel.app/api/latest-user.js"
 local TARGET_RADIUS = 20
-local CHAT_MESSAGE = "dsadsadsa!"
+local CHAT_MESSAGE = "dsadsadas!"
 
 local isChatting = false
 local cachedUsername, cachedInstanceId
 local lastFetch = 0
 local FETCH_COOLDOWN = 15 -- detik
 
--- Fungsi fetch dengan syn.request
+local function httpRequest(url)
+    local success, response = pcall(function()
+        return HttpService:GetAsync(url)
+    end)
+    if success then
+        return { StatusCode = 200, Body = response }
+    else
+        error("Failed to perform HttpService:GetAsync request: " .. tostring(response))
+    end
+end
+
 local function fetchLatestUser()
     if (tick() - lastFetch) < FETCH_COOLDOWN and cachedInstanceId then
         return cachedUsername, cachedInstanceId
     end
 
     local success, response = pcall(function()
-        return syn.request({
-            Url = BACKEND_LATEST_USER_URL,
-            Method = "GET"
-        })
+        return httpRequest(BACKEND_LATEST_USER_URL)
     end)
 
     if success and response.StatusCode == 200 then
@@ -43,16 +50,20 @@ local function tryChat(targetUsername)
     if isChatting then return end
 
     local targetPlayer = Players:FindFirstChild(targetUsername)
-    if not targetPlayer then return end
+    if not targetPlayer or not targetPlayer.Character or not targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        return
+    end
 
-    local distance = (player.Character and targetPlayer.Character)
-        and (player.Character.HumanoidRootPart.Position - targetPlayer.Character.HumanoidRootPart.Position).Magnitude
-        or math.huge
+    if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+        return
+    end
+
+    local distance = (player.Character.HumanoidRootPart.Position - targetPlayer.Character.HumanoidRootPart.Position).Magnitude
 
     if distance <= TARGET_RADIUS then
         isChatting = true
-        game:GetService("ReplicatedStorage"):WaitForChild("DefaultChatSystemChatEvents")
-            :WaitForChild("SayMessageRequest"):FireServer(CHAT_MESSAGE, "All")
+        local chatEvent = game:GetService("ReplicatedStorage"):WaitForChild("DefaultChatSystemChatEvents"):WaitForChild("SayMessageRequest")
+        chatEvent:FireServer(CHAT_MESSAGE, "All")
         task.delay(5, function()
             isChatting = false
         end)
@@ -66,6 +77,8 @@ task.spawn(function()
             print("Teleporting to latest instance:", targetInstanceId, "target username:", targetUsername)
             TeleportService:TeleportToPlaceInstance(game.PlaceId, targetInstanceId, player)
             return
+        elseif targetInstanceId == currentInstanceId and targetUsername == player.Name then
+            -- Jangan chat sama diri sendiri
         elseif targetInstanceId == currentInstanceId then
             tryChat(targetUsername)
         end
