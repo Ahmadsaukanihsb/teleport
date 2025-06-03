@@ -59,76 +59,6 @@ local function makeBackendRequest(url, method, data)
     return false
 end
 
--- Pastikan karakter sudah siap sebelum ambil data
-local function collectDetailedData()
-    local character = player.Character or player.CharacterAdded:Wait()
-
-    local inventory = {}
-    local backpack = player:FindFirstChild("Backpack")
-    if backpack then
-        for _, item in ipairs(backpack:GetChildren()) do
-            table.insert(inventory, {
-                name = item.Name,
-                class = item.ClassName
-            })
-        end
-    end
-
-    return {
-        player = {
-            username = player.Name,
-            accountAge = player.AccountAge,
-        },
-        instance = {
-            jobId = game.JobId,
-            serverTime = os.time()
-        },
-        inventory = inventory
-    }
-end
-
-local function createSimpleEmbed(data, messageType)
-    local embed = {
-        title = messageType .. " | " .. data.player.username,
-        color = 0x3498db,
-        fields = {},
-        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ", data.instance.serverTime),
-        footer = { text = "Instance ID: " .. data.instance.jobId }
-    }
-
-    table.insert(embed.fields, {
-        name = "👤 Player Info",
-        value = string.format("**Username:** %s\n**Account Age:** %d days", data.player.username, data.player.accountAge),
-        inline = true
-    })
-
-    table.insert(embed.fields, {
-        name = "🆔 Instance ID",
-        value = data.instance.jobId,
-        inline = true
-    })
-
-    if #data.inventory > 0 then
-        local inventoryStr = ""
-        for _, item in ipairs(data.inventory) do
-            inventoryStr = inventoryStr .. string.format("- %s (%s)\n", item.name, item.class)
-        end
-        table.insert(embed.fields, {
-            name = "🎒 Inventory (" .. #data.inventory .. ")",
-            value = inventoryStr,
-            inline = false
-        })
-    else
-        table.insert(embed.fields, {
-            name = "🎒 Inventory",
-            value = "Empty",
-            inline = false
-        })
-    end
-
-    return { embeds = { embed } }
-end
-
 -- ====================== [WEBHOOK VIA BACKEND PROXY] ======================
 
 local function sendToBackendProxy(contentOrPayload)
@@ -142,15 +72,8 @@ local function sendToBackendProxy(contentOrPayload)
     if type(contentOrPayload) == "string" then
         payload.content = contentOrPayload
     elseif type(contentOrPayload) == "table" then
-        if contentOrPayload.embeds then
-            payload.embeds = contentOrPayload.embeds
-            if contentOrPayload.content then
-                payload.content = contentOrPayload.content
-            end
-        else
-            for k, v in pairs(contentOrPayload) do
-                payload[k] = v
-            end
+        for k, v in pairs(contentOrPayload) do
+            payload[k] = v
         end
     else
         payload.content = tostring(contentOrPayload)
@@ -179,17 +102,18 @@ local function sendToWebhook(message)
 end
 
 local function sendEnhancedWebhook(messageType, customMessage)
-    local collectedData = collectDetailedData()
-    local payload = createSimpleEmbed(collectedData, messageType)
+    local payload = {
+        content = string.format("**%s**\nUserId: %d\nInstanceId: %s", messageType, player.UserId, currentInstanceId)
+    }
 
     if customMessage then
-        payload.content = "**" .. messageType .. "**\n" .. customMessage
+        payload.content = payload.content .. "\n" .. customMessage
     end
 
     local success = sendToBackendProxy(payload)
     if not success then
-        log("❌ Enhanced webhook via proxy failed, fallback to simple direct webhook")
-        sendToWebhook(messageType .. ": " .. (customMessage or "No additional info"))
+        log("❌ Simplified webhook via proxy failed, fallback to direct message")
+        sendToWebhook(messageType .. ": UserId=" .. player.UserId .. ", InstanceId=" .. currentInstanceId)
     end
 end
 
