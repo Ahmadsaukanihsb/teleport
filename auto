@@ -3,7 +3,7 @@ repeat task.wait() until game:IsLoaded()
 
 -- Konfigurasi
 local ID_GAME_TUJUAN = 126884695634066 -- Ganti dengan ID game target Anda
-local URL_API = "https://backend-vercel-ashy.vercel.app/api/instances" -- Endpoint API Anda
+local URL_API = "https://backend-vercel-ashy.vercel.app/api/latest-instance.js" -- Endpoint API Anda
 local INTERVAL_PEMERIKSAAN = 30 -- Detik antara pemeriksaan
 local PERCOBAAN_MAX = 3 -- Maksimum percobaan fetch
 local DELAY_GAGAL = 10 -- Delay saat gagal teleport
