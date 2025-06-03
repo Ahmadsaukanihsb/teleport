@@ -188,7 +188,7 @@ local function createRichEmbed(data, messageType)
         })
     end
 
-    return {embeds = {embed}}
+    return embed
 end
 
 -- ====================== [WEBHOOK VIA BACKEND PROXY] ======================
@@ -200,10 +200,15 @@ local function sendToBackendProxy(contentOrPayload)
     }
 
     if type(contentOrPayload) == "string" then
+        -- Simple message
         payload.content = contentOrPayload
     elseif type(contentOrPayload) == "table" then
-        for k,v in pairs(contentOrPayload) do
-            payload[k] = v
+        -- Kalau sudah embed, kirim sebagai embeds array sesuai backend
+        if contentOrPayload.embeds then
+            payload.embeds = contentOrPayload.embeds
+        else
+            -- Kalau table tapi bukan embed, fallback ke stringify (optional)
+            payload.content = HttpService:JSONEncode(contentOrPayload)
         end
     end
 
@@ -228,13 +233,16 @@ end
 
 local function sendToWebhook(message)
     -- Kirim pesan biasa ke proxy backend
-    sendToBackendProxy(message)
+    return sendToBackendProxy(message)
 end
 
 local function sendEnhancedWebhook(messageType, customMessage)
     local collectedData = collectDetailedData()
-    local payload = createRichEmbed(collectedData, messageType)
+    local embed = createRichEmbed(collectedData, messageType)
     
+    local payload = {
+        embeds = {embed}
+    }
     if customMessage then
         payload.content = "**"..messageType.."**\n"..customMessage
     end
