@@ -1,44 +1,53 @@
 repeat task.wait() until game:IsLoaded()
 
 local HttpService = game:GetService("HttpService")
-local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
+local Players = game:GetService("Players")
 
 local player = Players.LocalPlayer
-local BACKEND_BASE_URL = "https://backend-vercel-ashy.vercel.app/api"
-local INSTANCE_URL = BACKEND_BASE_URL .. "/latest-instance.js"
+local PLACE_ID = game.PlaceId
 
-local CHECK_INTERVAL = 10 -- cek tiap 10 detik
+-- Ganti URL ini dengan endpoint backend kamu
+local API_URL = "http://backend-vercel-ashy.vercel.app/api/latest-user.js"
 
-local currentInstanceId = game.JobId
-
-local function getActiveInstances()
+-- Fungsi ambil data dari backend
+local function getLatestUserAndInstance()
     local success, response = pcall(function()
-        return HttpService:GetAsync(INSTANCE_URL .. "?username=" .. player.Name)
+        return game:HttpGet(API_URL)
     end)
 
-    if success then
-        local data = HttpService:JSONDecode(response)
-        return data -- diasumsikan data berupa table dengan instanceId
+    if not success then
+        warn("[AutoJoiner] Gagal ambil data dari API:", response)
+        return nil
+    end
+
+    local ok, data = pcall(function()
+        return HttpService:JSONDecode(response)
+    end)
+
+    if ok and data and data.instanceId then
+        return data.username, data.instanceId
     else
-        warn("Gagal ambil data instance dari backend")
+        warn("[AutoJoiner] Gagal decode JSON atau tidak ada instanceId")
         return nil
     end
 end
 
-local function autoJoinNewInstance()
-    while true do
-        local data = getActiveInstances()
-        if data and data.instanceId and data.instanceId ~= currentInstanceId then
-            print("[AutoJoiner] Instance baru ditemukan: " .. data.instanceId .. ", teleporting...")
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, data.instanceId, player)
-            return -- teleport akan memindahkan player, stop loop di sini
-        else
-            print("[AutoJoiner] Tidak ada instance baru, tetap di " .. currentInstanceId)
-        end
-        task.wait(CHECK_INTERVAL)
+-- Fungsi teleport ke instance
+local function teleportToInstance(instanceId)
+    if not instanceId or instanceId == "" then
+        warn("[AutoJoiner] instanceId kosong, tidak bisa teleport")
+        return
     end
+
+    warn("[AutoJoiner] Teleporting ke instance:", instanceId)
+    TeleportService:TeleportToPlaceInstance(PLACE_ID, instanceId, player)
 end
 
--- Jalankan auto joiner
-autoJoinNewInstance()
+-- Eksekusi utama
+local username, instanceId = getLatestUserAndInstance()
+if instanceId then
+    teleportToInstance(instanceId)
+else
+    warn("[AutoJoiner] Tidak ada instanceId yang valid, teleport dibatalkan")
+end
