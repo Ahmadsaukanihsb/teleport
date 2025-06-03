@@ -1,47 +1,38 @@
 local HttpService = game:GetService("HttpService")
-local Players = game:GetService("Players")
 
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
+local BACKEND_SEND_URL = "https://backend-vercel-ashy.vercel.app/api/send.js" -- ganti sesuai domainmu
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6" -- ganti dengan webhook kamu
 
-local player = Players.LocalPlayer
+local embed = {
+    title = "🚀 Test Embed from Roblox",
+    description = "Ini adalah pesan embed yang dikirim dari Roblox ke Discord lewat backend proxy.",
+    color = 0x1abc9c,
+    fields = {
+        {name = "Field 1", value = "Ini isi field 1", inline = true},
+        {name = "Field 2", value = "Ini isi field 2", inline = true}
+    },
+    timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+    footer = { text = "Roblox Logger" }
+}
 
--- Fungsi buat data embed yang simpel untuk test
-local function createTestEmbed()
-    local timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ", os.time())
-    local embed = {
-        title = "🧪 Test Embed",
-        description = "Testing direct webhook embed from Roblox Lua",
-        color = 0x1abc9c,
-        timestamp = timestamp,
-        footer = { text = "Instance ID: "..tostring(game.JobId) },
-        fields = {
-            {
-                name = "Player Info",
-                value = string.format("Username: %s\nUserId: %d", player.Name, player.UserId),
-                inline = true
-            },
-            {
-                name = "Game Info",
-                value = string.format("PlaceId: %d\nJobId: %s", game.PlaceId, tostring(game.JobId)),
-                inline = true
-            }
-        }
-    }
-    return { embeds = { embed } }
+local payload = {
+    url = WEBHOOK_URL,
+    embeds = { embed }
+}
+
+local success, response = pcall(function()
+    return HttpService:RequestAsync({
+        Url = BACKEND_SEND_URL,
+        Method = "POST",
+        Headers = {
+            ["Content-Type"] = "application/json"
+        },
+        Body = HttpService:JSONEncode(payload)
+    })
+end)
+
+if success then
+    print("Webhook sent successfully")
+else
+    warn("Failed to send webhook:", response)
 end
-
-local function sendDirectWebhook(payload)
-    local jsonPayload = HttpService:JSONEncode(payload)
-    local success, response = pcall(function()
-        return HttpService:PostAsync(WEBHOOK_URL, jsonPayload, Enum.HttpContentType.ApplicationJson)
-    end)
-
-    if success then
-        print("✅ Direct webhook send success")
-    else
-        warn("❌ Direct webhook send failed: "..tostring(response))
-    end
-end
-
--- Kirim embed test
-sendDirectWebhook(createTestEmbed())
