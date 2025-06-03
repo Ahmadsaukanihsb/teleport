@@ -5,23 +5,32 @@ local Players = game:GetService("Players")
 local player = Players.LocalPlayer
 local placeId = game.PlaceId
 local currentInstanceId = game.JobId
+
+local http_request = syn and syn.request or http_request or http and http.request
+if not http_request then
+    warn("No compatible HTTP request function found")
+    return
+end
+
 local backendUrlBase = "https://backend-vercel-ashy.vercel.app/api/instance.js?username="
 
-local CHECK_INTERVAL = 10 -- detik cek instance baru
+local CHECK_INTERVAL = 10
 
 local function getLatestInstance(username)
     local url = backendUrlBase .. HttpService:UrlEncode(username)
-    local success, response = pcall(function()
-        return HttpService:GetAsync(url)
-    end)
+    local response = http_request({
+        Url = url,
+        Method = "GET",
+        Headers = {
+            ["Content-Type"] = "application/json"
+        }
+    })
 
-    if success then
-        local data = HttpService:JSONDecode(response)
-        if data and data.instanceId then
-            return data.instanceId
-        end
+    if response.StatusCode == 200 then
+        local data = HttpService:JSONDecode(response.Body)
+        return data.instanceId
     else
-        warn("Failed to get latest instance:", response)
+        warn("Failed to get latest instance: HTTP ".. tostring(response.StatusCode))
     end
     return nil
 end
