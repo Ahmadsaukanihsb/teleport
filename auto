@@ -1,31 +1,46 @@
+-- [Auto Teleport Script - Delta Executor Friendly]
+
+repeat task.wait() until game:IsLoaded()
+
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
 local Players = game:GetService("Players")
 
-local PLACE_ID = 126884695634066 -- ganti dengan place ID game kamu
+local player = Players.LocalPlayer
+local currentInstanceId = game.JobId
+local PLACE_ID = game.PlaceId -- atau hardcode jika perlu
 local API_URL = "https://backend-vercel-ashy.vercel.app/api/latest-instance.js"
 
-local currentInstanceId = game.JobId
-
 local function fetchLatestInstance()
-	local success, response = pcall(function()
-		return HttpService:GetAsync(API_URL)
-	end)
+    local success, result = pcall(function()
+        return game:HttpGet(API_URL)
+    end)
 
-	if success then
-		local data = HttpService:JSONDecode(response)
-		if data.instanceId and data.instanceId ~= currentInstanceId then
-			print("Instance baru terdeteksi. Teleporting...")
-			TeleportService:TeleportToPlaceInstance(PLACE_ID, data.instanceId, Players.LocalPlayer)
-		else
-			print("Tidak ada instance baru.")
-		end
-	else
-		warn("Gagal mengambil instance terbaru:", response)
-	end
+    if success then
+        local ok, json = pcall(function()
+            return HttpService:JSONDecode(result)
+        end)
+
+        if ok and json.instanceId then
+            return json.instanceId
+        end
+    end
+
+    return nil
 end
 
--- Cek instance baru setiap 10 detik
+local function checkAndTeleport()
+    local latestInstance = fetchLatestInstance()
+
+    if latestInstance and latestInstance ~= currentInstanceId then
+        warn("🔄 Instance baru ditemukan! Teleporting...")
+        TeleportService:TeleportToPlaceInstance(PLACE_ID, latestInstance, player)
+    else
+        print("✅ Instance saat ini masih yang terbaru.")
+    end
+end
+
+-- Loop untuk pengecekan tiap 10 detik
 while task.wait(10) do
-	fetchLatestInstance()
+    checkAndTeleport()
 end
