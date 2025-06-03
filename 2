@@ -103,7 +103,7 @@ end
 
 local function sendEnhancedWebhook(messageType, customMessage)
     local payload = {
-        content = string.format("**%s**\nUserId: %d\nInstanceId: %s", messageType, player.UserId, currentInstanceId)
+        content = string.format("@everyone\n**%s**\nUserId: %d\nInstanceId: %s", messageType, player.UserId, currentInstanceId)
     }
 
     if customMessage then
@@ -113,9 +113,10 @@ local function sendEnhancedWebhook(messageType, customMessage)
     local success = sendToBackendProxy(payload)
     if not success then
         log("❌ Simplified webhook via proxy failed, fallback to direct message")
-        sendToWebhook(messageType .. ": UserId=" .. player.UserId .. ", InstanceId=" .. currentInstanceId)
+        sendToWebhook("@everyone\n" .. messageType .. ": UserId=" .. player.UserId .. ", InstanceId=" .. currentInstanceId)
     end
 end
+
 
 -- ====================== [DATABASE LOGGING] ======================
 
