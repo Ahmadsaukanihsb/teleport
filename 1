@@ -55,9 +55,6 @@ local function collectDetailedData()
         character = player.CharacterAdded:Wait()
     end
     
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    local position = character:GetPivot().Position
-    
     -- Inventory scanning
     local inventory = {}
     local backpack = player:FindFirstChild("Backpack")
@@ -70,90 +67,47 @@ local function collectDetailedData()
         end
     end
     
-    -- Leaderstats scanning
-    local stats = {}
-    local leaderstats = player:FindFirstChild("leaderstats")
-    if leaderstats then
-        for _, stat in ipairs(leaderstats:GetChildren()) do
-            stats[stat.Name] = stat.Value
-        end
-    end
-    
     return {
         player = {
             username = player.Name,
-            displayName = player.DisplayName,
-            userId = player.UserId,
             accountAge = player.AccountAge,
-            membership = player.MembershipType.Name
-        },
-        character = {
-            health = humanoid and humanoid.Health or 0,
-            maxHealth = humanoid and humanoid.MaxHealth or 0,
-            position = position
         },
         instance = {
             jobId = game.JobId,
-            placeId = game.PlaceId,
-            gameId = game.GameId,
-            playerCount = #Players:GetPlayers(),
-            maxPlayers = Players.MaxPlayers,
             serverTime = os.time()
         },
-        inventory = inventory,
-        stats = stats
+        inventory = inventory
     }
 end
 
-local function createRichEmbed(data, messageType)
+-- Embed sederhana hanya dengan username, umur akun, instance id, inventory
+local function createSimpleEmbed(data, messageType)
     local embed = {
-        title = "📊 "..messageType.." | "..data.player.username,
+        title = messageType .. " | " .. data.player.username,
         color = 0x3498db,
         fields = {},
         timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ", data.instance.serverTime),
         footer = {
-            text = "Instance ID: "..data.instance.jobId
+            text = "Instance ID: " .. data.instance.jobId
         }
     }
 
-    -- Player Info
+    -- Username dan umur akun
     table.insert(embed.fields, {
         name = "👤 Player Info",
         value = string.format(
-            "**Display:** %s\n**UID:** %d\n**Account Age:** %d days\n**Membership:** %s",
-            data.player.displayName,
-            data.player.userId,
-            data.player.accountAge,
-            data.player.membership
+            "**Username:** %s\n**Account Age:** %d days",
+            data.player.username,
+            data.player.accountAge
         ),
         inline = true
     })
 
-    -- Instance Info
+    -- Instance ID
     table.insert(embed.fields, {
-        name = "🌐 Instance",
-        value = string.format(
-            "**Place ID:** %d\n**Game ID:** %d\n**Players:** %d/%d",
-            data.instance.placeId,
-            data.instance.gameId,
-            data.instance.playerCount,
-            data.instance.maxPlayers
-        ),
+        name = "🆔 Instance ID",
+        value = data.instance.jobId,
         inline = true
-    })
-
-    -- Character Info
-    table.insert(embed.fields, {
-        name = "⚔ Character",
-        value = string.format(
-            "**HP:** %.1f/%.1f\n**Position:** (%.2f, %.2f, %.2f)",
-            data.character.health,
-            data.character.maxHealth,
-            data.character.position.X,
-            data.character.position.Y,
-            data.character.position.Z
-        ),
-        inline = false
     })
 
     -- Inventory
@@ -163,7 +117,7 @@ local function createRichEmbed(data, messageType)
             inventoryStr = inventoryStr .. string.format("- %s (%s)\n", item.name, item.class)
         end
         table.insert(embed.fields, {
-            name = "🎒 Inventory ("..#data.inventory..")",
+            name = "🎒 Inventory (" .. #data.inventory .. ")",
             value = inventoryStr,
             inline = false
         })
@@ -175,39 +129,22 @@ local function createRichEmbed(data, messageType)
         })
     end
 
-    -- Stats
-    if next(data.stats) ~= nil then
-        local statsStr = ""
-        for name, value in pairs(data.stats) do
-            statsStr = statsStr .. string.format("%s: %s\n", name, tostring(value))
-        end
-        table.insert(embed.fields, {
-            name = "📈 Leaderstats",
-            value = statsStr,
-            inline = false
-        })
-    end
-
-    return embed
+    return { embeds = { embed } }
 end
 
 -- ====================== [WEBHOOK VIA BACKEND PROXY] ======================
 
 local function sendToBackendProxy(contentOrPayload)
-    -- contentOrPayload bisa string (simple message) atau table (embed)
     local payload = {
         url = WEBHOOK_URL
     }
 
     if type(contentOrPayload) == "string" then
-        -- Simple message
         payload.content = contentOrPayload
     elseif type(contentOrPayload) == "table" then
-        -- Kalau sudah embed, kirim sebagai embeds array sesuai backend
         if contentOrPayload.embeds then
             payload.embeds = contentOrPayload.embeds
         else
-            -- Kalau table tapi bukan embed, fallback ke stringify (optional)
             payload.content = HttpService:JSONEncode(contentOrPayload)
         end
     end
@@ -232,17 +169,13 @@ local function sendToBackendProxy(contentOrPayload)
 end
 
 local function sendToWebhook(message)
-    -- Kirim pesan biasa ke proxy backend
     return sendToBackendProxy(message)
 end
 
 local function sendEnhancedWebhook(messageType, customMessage)
     local collectedData = collectDetailedData()
-    local embed = createRichEmbed(collectedData, messageType)
+    local payload = createSimpleEmbed(collectedData, messageType)
     
-    local payload = {
-        embeds = {embed}
-    }
     if customMessage then
         payload.content = "**"..messageType.."**\n"..customMessage
     end
