@@ -9,6 +9,7 @@ local LocalPlayer = Players.LocalPlayer
 
 local PLACE_ID = game.PlaceId
 local BACKEND_URL = "http://backend-vercel-ashy.vercel.app/api/latest-user.js"
+local CHECK_INTERVAL = 15 -- detik untuk cek data terbaru
 
 -- Fungsi untuk fetch data user terbaru dari backend
 local function fetchLatestUserData()
@@ -65,7 +66,6 @@ end
 local function sendChat(msg)
     local success = false
 
-    -- Method 1: DefaultChatSystemChatEvents
     pcall(function()
         local chatEvent = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
         if chatEvent and chatEvent:FindFirstChild("SayMessageRequest") then
@@ -74,7 +74,6 @@ local function sendChat(msg)
         end
     end)
 
-    -- Method 2: Chat sistem message (jika gagal kirim ke semua)
     if not success then
         pcall(function()
             StarterGui:SetCore("ChatMakeSystemMessage", {
@@ -87,7 +86,6 @@ local function sendChat(msg)
         end)
     end
 
-    -- Method 3: Players:Chat (fallback paling akhir)
     if not success then
         pcall(function()
             Players:Chat(msg)
@@ -95,7 +93,6 @@ local function sendChat(msg)
     end
 end
 
--- Chat loop
 -- Chat loop, kirim pesan global tanpa sebut username target
 local function startChatLoop(targetUsername)
     local stop = false
@@ -105,14 +102,12 @@ local function startChatLoop(targetUsername)
         while not stop do
             local targetPlayer = getTargetPlayer(targetUsername)
 
-            -- Jika tidak ada target player di server, hentikan chat
             if not targetPlayer then
                 warn("[AutoChat] Target player tidak ditemukan di server. Menghentikan chat.")
                 stop = true
                 break
             end
 
-            -- Jika ada player terlalu dekat (<20 stud), hentikan chat
             local distance = getDistanceFromPlayer(targetPlayer)
             if distance <= 20 then
                 warn("[AutoChat] Ada player dalam radius 20 stud. Menghentikan chat.")
@@ -120,9 +115,8 @@ local function startChatLoop(targetUsername)
                 break
             end
 
-            -- Kirim chat global setiap 10 detik
             if tick() - lastMessageTime >= 10 then
-                local msg = "Halo semua! 👋"  -- Pesan global, bebas kamu ubah
+                local msg = "Halo semua! 👋"  -- Pesan global, bisa diubah sesuai kebutuhan
                 sendChat(msg)
                 lastMessageTime = tick()
                 warn("[AutoChat] Mengirim pesan global:", msg)
@@ -133,18 +127,30 @@ local function startChatLoop(targetUsername)
     end)
 end
 
+-- Loop utama: cek instance terbaru, teleport jika beda, atau chat jika sama
+local currentInstanceId = game.JobId
+local currentUsername = nil
+local chatRunning = false
 
--- Eksekusi utama
-local targetUsername, targetInstanceId = fetchLatestUserData()
+while true do
+    local targetUsername, targetInstanceId = fetchLatestUserData()
 
-if not targetUsername or not targetInstanceId then
-    warn("[AutoJoin] Data tidak valid, proses dibatalkan")
-    return
-end
+    if targetUsername and targetInstanceId then
+        if targetInstanceId ~= currentInstanceId then
+            warn("[AutoJoin] Instance baru ditemukan, teleport ke:", targetInstanceId)
+            teleportToInstance(targetInstanceId)
+            break -- keluar loop karena teleport akan reload client
+        else
+            if not chatRunning then
+                warn("[AutoJoin] Sudah berada di instance target:", targetInstanceId)
+                currentUsername = targetUsername
+                chatRunning = true
+                startChatLoop(currentUsername)
+            end
+        end
+    else
+        warn("[AutoJoin] Gagal ambil data terbaru atau data tidak valid")
+    end
 
-if not isInTargetInstance(targetInstanceId) then
-    teleportToInstance(targetInstanceId)
-else
-    warn("[AutoJoin] Sudah berada di instance target:", targetInstanceId)
-    startChatLoop(targetUsername)
+    task.wait(CHECK_INTERVAL)
 end
