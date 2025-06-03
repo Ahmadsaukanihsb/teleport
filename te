@@ -1,7 +1,7 @@
 local HttpService = game:GetService("HttpService")
 
 local payload = {
-    url = "https://discord.com/api/webhooks/XXX/YYY",
+    url = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6",
     content = "✅ Tes berhasil dari proxy!"
 }
 
