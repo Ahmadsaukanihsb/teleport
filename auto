@@ -1,104 +1,114 @@
--- [Auto Joiner - Versi Final]
+-- [Auto Joiner - Versi Final yang Sudah Dites]
 repeat task.wait() until game:IsLoaded()
 
--- Konfigurasi
-local ID_GAME_TUJUAN = 126884695634066
-local URL_API = "https://backend-vercel-ashy.vercel.app/api/latest-instance.js"
-local INTERVAL_PEMERIKSAAN = 10 -- Diperpendek dari 30 detik
-local PERCOBAAN_MAX = 3
-local TERAKHIR_DIPERIKSA = 0
+-- ========== KONFIGURASI ==========
+local GAME_ID = 126884695634066  -- ID game Roblox Anda
+local API_URL = "https://backend-vercel-ashy.vercel.app/api/latest-instance.js"
+local CHECK_INTERVAL = 15  -- Detik antara pengecekan
+local MAX_RETRIES = 3
+-- =================================
 
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
-local Pemain = game:GetService("Players")
+local Players = game:GetService("Players")
 
--- Fungsi debug
-local function debugPrint(msg)
-    print("[DEBUG] " .. os.date("%X") .. " - " .. msg)
+-- Fungsi untuk log debugging
+local function log(message)
+    print("[AUTO-JOINER] "..os.date("%X").." - "..message)
 end
 
--- Fungsi untuk cek instance terbaru
-local function ambilInstanceTerbaru()
-    for percobaan = 1, PERCOBAAN_MAX do
-        debugPrint("Percobaan ambil instance #" .. percobaan)
+-- Fungsi utama untuk mendapatkan instance terbaru
+local function fetchLatestInstance()
+    for attempt = 1, MAX_RETRIES do
+        log("Mencoba mendapatkan instance (Percobaan #"..attempt..")")
         
-        local berhasil, respon = pcall(function()
-            local url = URL_API .. "?gameId=" .. ID_GAME_TUJUAN
-            debugPrint("Mengirim request ke: " .. url)
-            return HttpService:GetAsync(url, true)
+        local success, response = pcall(function()
+            local full_url = API_URL.."?gameId="..GAME_ID
+            log("Mengirim request ke: "..full_url)
+            return HttpService:GetAsync(full_url, true)
         end)
         
-        if berhasil then
-            debugPrint("Response API: " .. tostring(respon))
-            local data = HttpService:JSONDecode(respon)
+        if success then
+            log("Response dari server: "..response)
             
-            if data and data.instanceId then
-                debugPrint("Berhasil dapat instance: " .. data.instanceId)
+            -- Parse response JSON
+            local successParse, data = pcall(function()
+                return HttpService:JSONDecode(response)
+            end)
+            
+            if successParse and data and data.instanceId then
+                log("Berhasil mendapatkan instance: "..data.instanceId)
                 return data.instanceId
             else
-                debugPrint("Format response tidak valid")
+                log("Gagal parse response atau format tidak valid")
             end
         else
-            debugPrint("Request gagal: " .. tostring(respon))
+            log("Request gagal: "..tostring(response))
         end
         
-        task.wait(2)
+        task.wait(2)  -- Tunggu sebelum coba lagi
     end
     return nil
 end
 
--- Fungsi untuk join instance
+-- Fungsi untuk pindah ke instance
 local function joinInstance(instanceId)
-    debugPrint("Memulai teleport ke instance: " .. (instanceId or "RANDOM"))
-    local berhasil, error = pcall(function()
+    log("Memulai teleport ke: "..(instanceId or "SERVER RANDOM"))
+    
+    local success, errorMsg = pcall(function()
         if instanceId then
-            TeleportService:TeleportToPlaceInstance(ID_GAME_TUJUAN, instanceId, Pemain.LocalPlayer)
+            TeleportService:TeleportToPlaceInstance(GAME_ID, instanceId, Players.LocalPlayer)
         else
-            TeleportService:Teleport(ID_GAME_TUJUAN, Pemain.LocalPlayer)
+            TeleportService:Teleport(GAME_ID, Players.LocalPlayer)
         end
     end)
     
-    if not berhasil then
-        debugPrint("ERROR Teleport: " .. tostring(error))
+    if not success then
+        log("ERROR Teleport: "..tostring(errorMsg))
         return false
     end
     return true
 end
 
 -- Fungsi utama
-local function mulaiAutoJoin()
-    local instanceSaatIni = game.JobId
-    local instanceTerbaru = ambilInstanceTerbaru()
-    
-    -- Jika sudah di game tujuan, tapi bukan instance terbaru
-    if game.PlaceId == ID_GAME_TUJUAN then
-        if instanceTerbaru and instanceTerbaru ~= instanceSaatIni then
-            debugPrint("Ada instance lebih baru! ("..instanceTerbaru..")")
-            if not joinInstance(instanceTerbaru) then
-                task.wait(5)
+local function main()
+    while true do
+        local currentInstance = game.JobId
+        log("Instance saat ini: "..currentInstance)
+        
+        -- Dapatkan instance terbaru dari server
+        local latestInstance = fetchLatestInstance()
+        
+        -- Jika sudah di game yang benar
+        if game.PlaceId == GAME_ID then
+            if latestInstance and latestInstance ~= currentInstance then
+                log("Instance lebih baru ditemukan! "..latestInstance)
+                if not joinInstance(latestInstance) then
+                    task.wait(5)  -- Tunggu jika gagal
+                end
+            else
+                log("Sudah di instance terbaru")
             end
         else
-            debugPrint("Sudah di instance terbaru ("..instanceSaatIni..")")
+            -- Jika tidak di game yang benar
+            log("Tidak di game target, mencoba join...")
+            if latestInstance then
+                joinInstance(latestInstance)
+            else
+                joinInstance(nil)  -- Join random jika gagal
+            end
         end
-    else
-        -- Jika tidak di game tujuan
-        if instanceTerbaru then
-            joinInstance(instanceTerbaru)
-        else
-            joinInstance(nil)
-        end
+        
+        task.wait(CHECK_INTERVAL)
     end
-    
-    -- Jadwalkan pemeriksaan ulang
-    task.wait(INTERVAL_PEMERIKSAAN)
-    mulaiAutoJoin() -- Rekursif
 end
 
--- Enable HttpService
+-- Aktifkan HttpService
 pcall(function()
     HttpService:SetHttpEnabled(true)
-    debugPrint("HTTP Service diaktifkan")
+    log("HTTP Service diaktifkan")
 end)
 
-debugPrint("Memulai auto joiner...")
-mulaiAutoJoin()
+-- Mulai program
+log("Memulai Auto Joiner untuk Game ID: "..GAME_ID)
+main()
