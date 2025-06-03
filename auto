@@ -4,7 +4,7 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local StarterGui = game:GetService("StarterGui")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TextChatService = game:GetService("TextChatService")
 local LocalPlayer = Players.LocalPlayer
 
 local PLACE_ID = game.PlaceId
@@ -62,43 +62,21 @@ local function getDistanceFromPlayer(target)
     return math.huge
 end
 
--- Fungsi untuk mengirim chat dengan fallback
+-- Fungsi untuk mengirim chat menggunakan TextChatService
 local function sendChat(msg)
-    local success = false
-    print("[sendChat] Mengirim pesan:", msg)
-
-    pcall(function()
-        local chatEvent = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
-        if chatEvent and chatEvent:FindFirstChild("SayMessageRequest") then
-            print("[sendChat] Mengirim via SayMessageRequest")
-            chatEvent.SayMessageRequest:FireServer(msg, "All")
-            success = true
+    local success, err = pcall(function()
+        local channel = TextChatService.TextChannels.RBXGeneral
+        if channel then
+            channel:SendAsync(msg)
+            print("[sendChat] Mengirim pesan via TextChatService:", msg)
         else
-            print("[sendChat] SayMessageRequest tidak ditemukan")
+            warn("[sendChat] Channel RBXGeneral tidak ditemukan")
         end
     end)
-
     if not success then
-        pcall(function()
-            print("[sendChat] Mengirim via ChatMakeSystemMessage")
-            StarterGui:SetCore("ChatMakeSystemMessage", {
-                Text = msg,
-                Color = Color3.fromRGB(255, 255, 255),
-                Font = Enum.Font.SourceSansBold,
-                FontSize = Enum.FontSize.Size24
-            })
-            success = true
-        end)
-    end
-
-    if not success then
-        pcall(function()
-            print("[sendChat] Mengirim via Players:Chat")
-            Players:Chat(msg)
-        end)
+        warn("[sendChat] Gagal mengirim pesan:", err)
     end
 end
-
 
 -- Chat loop, kirim pesan global tanpa sebut username target
 local function startChatLoop(targetUsername)
