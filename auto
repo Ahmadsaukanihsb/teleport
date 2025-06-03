@@ -1,168 +1,111 @@
--- Enhanced Roblox Auto Joiner for Delta Executor
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 -- CONFIGURATION
-local API_URL = "https://backend-vercel-ashy.vercel.app/join.js"  -- Endpoint baru yang mengembalikan instance terbaru
-local CHECK_INTERVAL = 10
-local CHAT_INTERVAL = 30
-local PROXIMITY_RADIUS = 20
+local UPDATE_INSTANCE_URL = "https://backend-vercel-ashy.vercel.app/instance.js"
+local GET_LATEST_INSTANCE_URL = "https://backend-vercel-ashy.vercel.app/join.js"
+local CHECK_INTERVAL = 15 -- detik cek instance terbaru
 local DEBUG_MODE = true
 
-local DATABASE_USERS = {
-    "Player1", "Player2", "Player3"
-}
-
 local lastInstanceId = nil
-local isChatting = false
-local shouldStopChatting = false
 local stopScript = false
 
-local function log(message)
+local function log(msg)
     if DEBUG_MODE then
-        print("[AutoJoiner] " .. message)
+        print("[AutoTeleport] " .. msg)
     end
 end
 
-local function isInDatabase(username)
-    for _, dbUser in ipairs(DATABASE_USERS) do
-        if username:lower() == dbUser:lower() then
-            return true
-        end
+local function getLocalPlayer()
+    local player = Players.LocalPlayer
+    while not player do
+        task.wait(0.1)
+        player = Players.LocalPlayer
     end
-    return false
+    return player
 end
 
-local function checkProximity()
-    local localPlayer = Players.LocalPlayer
-    local char = localPlayer.Character
-    if not char then return false end
-
-    local localRoot = char:FindFirstChild("HumanoidRootPart")
-    if not localRoot then return false end
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= localPlayer and player.Character then
-            local root = player.Character:FindFirstChild("HumanoidRootPart")
-            if root and (localRoot.Position - root.Position).Magnitude <= PROXIMITY_RADIUS then
-                return true
-            end
-        end
-    end
-    return false
-end
-
-local function sendChatMessage(message)
-    local chatEvents = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
-    if chatEvents then
-        local say = chatEvents:FindFirstChild("SayMessageRequest")
-        if say then
-            say:FireServer(message, "All")
-        end
-    end
-end
-
-local function startChatLoop()
-    if isChatting then return end
-    isChatting = true
-    shouldStopChatting = false
-
-    task.spawn(function()
-        while isChatting and not shouldStopChatting do
-            if checkProximity() then
-                log("Nearby player detected. Stopping chat.")
-                shouldStopChatting = true
-                break
-            end
-            sendChatMessage("Hello from auto joiner!")
-            task.wait(CHAT_INTERVAL)
-        end
-        isChatting = false
+-- Fungsi update data instance ke backend (POST)
+local function updateInstanceOnBackend(instanceId)
+    local player = getLocalPlayer()
+    local data = {
+        userId = tostring(player.UserId),
+        username = player.Name,
+        instanceId = instanceId,
+        placeId = tostring(game.PlaceId),
+        gameId = "", -- optional, isi jika ada
+        status = "active",
+        timestamp = tostring(os.time() * 1000)
+    }
+    local jsonData = HttpService:JSONEncode(data)
+    local success, result = pcall(function()
+        return HttpService:PostAsync(UPDATE_INSTANCE_URL, jsonData, Enum.HttpContentType.ApplicationJson)
     end)
+    if success then
+        log("Instance updated on backend: " .. instanceId)
+    else
+        log("Failed to update instance: " .. tostring(result))
+    end
 end
 
-local function getLatestInstance()
+-- Fungsi ambil instance terbaru (GET)
+local function getLatestInstanceFromBackend()
     local success, response = pcall(function()
-        return HttpService:GetAsync(API_URL, true)  -- true untuk cache-bypass
+        return HttpService:GetAsync(GET_LATEST_INSTANCE_URL)
     end)
-
     if success then
         local data = HttpService:JSONDecode(response)
         if data and data.instanceId then
             return data.instanceId
-        else
-            log("Response JSON tidak mengandung instanceId")
         end
-    else
-        log("Gagal fetch instance terbaru: " .. tostring(response))
     end
     return nil
 end
 
 local function teleportToInstance(instanceId)
-    local localPlayer = Players.LocalPlayer
-    if not localPlayer then return false end
+    local player = getLocalPlayer()
+    if not player then return false end
 
     log("Teleporting to instance: " .. instanceId)
-    local success, result = pcall(function()
-        TeleportService:TeleportToPlaceInstance(
-            game.PlaceId,
-            instanceId,
-            localPlayer
-        )
+    local success, err = pcall(function()
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, instanceId, player)
     end)
-
     if not success then
-        log("Teleport failed: " .. tostring(result))
+        log("Teleport failed: " .. tostring(err))
     end
     return success
 end
 
 local function mainLoop()
-    while not stopScript do
-        for _, player in ipairs(Players:GetPlayers()) do
-            if isInDatabase(player.Name) and not isChatting then
-                log("Database player detected: " .. player.Name)
-                startChatLoop()
-                break
-            end
-        end
+    local player = getLocalPlayer()
+    local currentInstanceId = "init" -- dummy initial id
 
-        local newInstance = getLatestInstance()
+    -- Update instance pertama kali ke backend
+    updateInstanceOnBackend(currentInstanceId)
+    lastInstanceId = currentInstanceId
+
+    while not stopScript do
+        -- Cek instance terbaru
+        local newInstance = getLatestInstanceFromBackend()
+
         if newInstance and newInstance ~= lastInstanceId then
-            log("New instance detected: " .. newInstance)
             lastInstanceId = newInstance
             teleportToInstance(newInstance)
+            break -- biasanya teleport akan pindah server, loop berhenti
         end
 
         task.wait(CHECK_INTERVAL)
     end
 end
 
-local function init()
-    log("Initializing auto joiner...")
-    repeat task.wait() until Players.LocalPlayer
-
-    lastInstanceId = getLatestInstance()
-    if lastInstanceId then
-        log("Initial instance: " .. lastInstanceId)
-    else
-        log("Failed to fetch initial instance.")
-    end
-
-    task.spawn(mainLoop)
-end
-
--- End key cleanup
 UserInputService.InputEnded:Connect(function(input)
     if input.KeyCode == Enum.KeyCode.End then
         stopScript = true
-        log("Script manually terminated.")
+        log("Script terminated manually.")
     end
 end)
 
-init()
-log("Auto joiner loaded. Press End to terminate.")
+log("Auto Teleport started.")
+task.spawn(mainLoop)
