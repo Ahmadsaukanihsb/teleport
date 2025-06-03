@@ -3,7 +3,6 @@ repeat task.wait() until game:IsLoaded()
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
-local StarterGui = game:GetService("StarterGui")
 local TextChatService = game:GetService("TextChatService")
 local LocalPlayer = Players.LocalPlayer
 
@@ -40,11 +39,6 @@ local function teleportToInstance(instanceId)
     TeleportService:TeleportToPlaceInstance(PLACE_ID, instanceId, LocalPlayer)
 end
 
--- Cek apakah kita sudah berada di target instance
-local function isInTargetInstance(targetInstanceId)
-    return game.JobId == targetInstanceId
-end
-
 -- Cek apakah target player ada di server
 local function getTargetPlayer(username)
     return Players:FindFirstChild(username)
@@ -78,25 +72,29 @@ local function sendChat(msg)
     end
 end
 
+-- Variabel kontrol chat loop
+local chatRunning = false
+local chatStop = false
+
 -- Chat loop, kirim pesan global tanpa sebut username target
 local function startChatLoop(targetUsername)
-    local stop = false
-    local lastMessageTime = 0
+    if chatRunning then return end
+    chatRunning = true
+    chatStop = false
 
     task.spawn(function()
-        while not stop do
+        local lastMessageTime = 0
+        while not chatStop do
             local targetPlayer = getTargetPlayer(targetUsername)
 
             if not targetPlayer then
                 warn("[AutoChat] Target player tidak ditemukan di server. Menghentikan chat.")
-                stop = true
                 break
             end
 
             local distance = getDistanceFromPlayer(targetPlayer)
             if distance <= 20 then
                 warn("[AutoChat] Ada player dalam radius 20 stud. Menghentikan chat.")
-                stop = true
                 break
             end
 
@@ -109,13 +107,18 @@ local function startChatLoop(targetUsername)
 
             task.wait(5)
         end
+        chatRunning = false
     end)
+end
+
+-- Fungsi untuk menghentikan chat loop
+local function stopChatLoop()
+    chatStop = true
 end
 
 -- Loop utama: cek instance terbaru, teleport jika beda, atau chat jika sama
 local currentInstanceId = game.JobId
 local currentUsername = nil
-local chatRunning = false
 
 while true do
     local targetUsername, targetInstanceId = fetchLatestUserData()
@@ -123,13 +126,13 @@ while true do
     if targetUsername and targetInstanceId then
         if targetInstanceId ~= currentInstanceId then
             warn("[AutoJoin] Instance baru ditemukan, teleport ke:", targetInstanceId)
+            stopChatLoop()
             teleportToInstance(targetInstanceId)
             break -- keluar loop karena teleport akan reload client
         else
             if not chatRunning then
                 warn("[AutoJoin] Sudah berada di instance target:", targetInstanceId)
                 currentUsername = targetUsername
-                chatRunning = true
                 startChatLoop(currentUsername)
             end
         end
