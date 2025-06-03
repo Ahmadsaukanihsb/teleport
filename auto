@@ -96,6 +96,7 @@ local function sendChat(msg)
 end
 
 -- Chat loop
+-- Chat loop, kirim pesan global tanpa sebut username target
 local function startChatLoop(targetUsername)
     local stop = false
     local lastMessageTime = 0
@@ -104,30 +105,34 @@ local function startChatLoop(targetUsername)
         while not stop do
             local targetPlayer = getTargetPlayer(targetUsername)
 
+            -- Jika tidak ada target player di server, hentikan chat
             if not targetPlayer then
                 warn("[AutoChat] Target player tidak ditemukan di server. Menghentikan chat.")
                 stop = true
                 break
             end
 
+            -- Jika ada player terlalu dekat (<20 stud), hentikan chat
             local distance = getDistanceFromPlayer(targetPlayer)
             if distance <= 20 then
-                warn("[AutoChat] Jarak terlalu dekat (" .. tostring(math.floor(distance)) .. "). Menghentikan chat.")
+                warn("[AutoChat] Ada player dalam radius 20 stud. Menghentikan chat.")
                 stop = true
                 break
             end
 
+            -- Kirim chat global setiap 10 detik
             if tick() - lastMessageTime >= 10 then
-                local msg = string.format("Hai %s 👋", targetUsername)
+                local msg = "Halo semua! 👋"  -- Pesan global, bebas kamu ubah
                 sendChat(msg)
                 lastMessageTime = tick()
-                warn("[AutoChat] Mengirim pesan ke:", targetUsername)
+                warn("[AutoChat] Mengirim pesan global:", msg)
             end
 
             task.wait(5)
         end
     end)
 end
+
 
 -- Eksekusi utama
 local targetUsername, targetInstanceId = fetchLatestUserData()
