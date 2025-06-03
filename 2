@@ -8,6 +8,7 @@ local BACKEND_BASE_URL = "https://backend-vercel-ashy.vercel.app/api"
 local REGISTER_URL = BACKEND_BASE_URL .. "/register.js"
 local INSTANCE_URL = BACKEND_BASE_URL .. "/instance"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
+local BACKEND_SEND_URL = BACKEND_BASE_URL .. "/send.js"
 local EXTERNAL_SCRIPT_URL = "https://pastebin.com/raw/pfpzbXiF"
 
 local REPORT_INTERVAL = 300 -- 5 minutes
@@ -18,7 +19,7 @@ local player = Players.LocalPlayer
 local currentInstanceId = game.JobId
 local isRunning = true
 
--- ====================== [ENHANCED UTILITY FUNCTIONS] ======================
+-- ====================== [UTILITY FUNCTIONS] ======================
 
 local function log(message)
     if DEBUG_MODE then
@@ -182,31 +183,44 @@ local function createRichEmbed(data, messageType)
     return {embeds = {embed}}
 end
 
-local function sendToWebhook(message)
+-- ====================== [WEBHOOK VIA BACKEND PROXY] ======================
+
+local function sendToBackendProxy(contentOrPayload)
+    -- contentOrPayload bisa string (simple message) atau table (embed)
+    local payload = {
+        url = WEBHOOK_URL
+    }
+
+    if type(contentOrPayload) == "string" then
+        payload.content = contentOrPayload
+    elseif type(contentOrPayload) == "table" then
+        for k,v in pairs(contentOrPayload) do
+            payload[k] = v
+        end
+    end
+
     local success, response = pcall(function()
         return HttpService:RequestAsync({
-            Url = WEBHOOK_URL,
+            Url = BACKEND_SEND_URL,
             Method = "POST",
             Headers = {
                 ["Content-Type"] = "application/json"
             },
-            Body = HttpService:JSONEncode({
-                content = message,
-                username = "Game Logger",
-                avatar_url = "https://i.imgur.com/fKfsv2P.png"
-            })
+            Body = HttpService:JSONEncode(payload)
         })
     end)
 
     if not success then
-        log("❌ Failed to send webhook: " .. tostring(response))
-        -- Fallback to backend if direct fails
-        local backendUrl = "https://webhook-git-main-ahmadsaukanihsbs-projects.vercel.app/?webhook=" ..
-            HttpService:UrlEncode(WEBHOOK_URL) .. "&content=" .. HttpService:UrlEncode(message)
-        pcall(function() HttpService:GetAsync(backendUrl) end)
+        log("❌ Failed to send webhook via proxy: " .. tostring(response))
     else
-        log("✅ Webhook sent successfully")
+        log("✅ Webhook sent via proxy successfully")
     end
+    return success
+end
+
+local function sendToWebhook(message)
+    -- Kirim pesan biasa ke proxy backend
+    sendToBackendProxy(message)
 end
 
 local function sendEnhancedWebhook(messageType, customMessage)
@@ -217,20 +231,9 @@ local function sendEnhancedWebhook(messageType, customMessage)
         payload.content = "**"..messageType.."**\n"..customMessage
     end
 
-    local success, response = pcall(function()
-        return HttpService:RequestAsync({
-            Url = WEBHOOK_URL,
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json"
-            },
-            Body = HttpService:JSONEncode(payload)
-        })
-    end)
-
+    local success = sendToBackendProxy(payload)
     if not success then
-        log("❌ Enhanced webhook failed: "..tostring(response))
-        -- Fallback to simple webhook
+        log("❌ Enhanced webhook via proxy failed, fallback to simple direct webhook")
         sendToWebhook(messageType..": "..(customMessage or "No additional info"))
     end
 end
@@ -343,7 +346,7 @@ local function shutdown()
     sendEnhancedWebhook("LOGGER_STOPPED", "Manual shutdown triggered")
 end
 
--- Handle graceful shutdown
+-- Handle graceful shutdown (press End key)
 UserInputService.InputEnded:Connect(function(input, processed)
     if input.KeyCode == Enum.KeyCode.End then
         shutdown()
