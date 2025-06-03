@@ -6,7 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 -- CONFIGURATION
-local API_URL = "https://backend-vercel-ashy.vercel.app/check.js"
+local API_URL = "https://backend-vercel-ashy.vercel.app/join.js"  -- Endpoint baru yang mengembalikan instance terbaru
 local CHECK_INTERVAL = 10
 local CHAT_INTERVAL = 30
 local PROXIMITY_RADIUS = 20
@@ -86,14 +86,18 @@ end
 
 local function getLatestInstance()
     local success, response = pcall(function()
-        return HttpService:GetAsync(API_URL)
+        return HttpService:GetAsync(API_URL, true)  -- true untuk cache-bypass
     end)
 
     if success then
         local data = HttpService:JSONDecode(response)
         if data and data.instanceId then
             return data.instanceId
+        else
+            log("Response JSON tidak mengandung instanceId")
         end
+    else
+        log("Gagal fetch instance terbaru: " .. tostring(response))
     end
     return nil
 end
@@ -129,6 +133,7 @@ local function mainLoop()
 
         local newInstance = getLatestInstance()
         if newInstance and newInstance ~= lastInstanceId then
+            log("New instance detected: " .. newInstance)
             lastInstanceId = newInstance
             teleportToInstance(newInstance)
         end
