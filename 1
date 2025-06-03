@@ -1,4 +1,4 @@
--- [AutoExec Logger Script - Portable QueueOnTeleport]
+-- [AutoExec Logger Script - Delta Executor Friendly]
 
 repeat task.wait() until game:IsLoaded()
 
@@ -18,7 +18,6 @@ repeat task.wait() until game:IsLoaded()
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
-local TeleportService = game:GetService("TeleportService")
 
 local player = Players.LocalPlayer
 local currentInstanceId = game.JobId
@@ -173,30 +172,10 @@ if not ok then
 end
 ]==]
 
--- Portable QueueOnTeleport support:
-local function safeQueueOnTeleport(scriptString)
-    -- Cek executor khusus dulu (biasanya lowercase)
-    if type(queueonteleport) == "function" then
-        queueonteleport(scriptString)
-        return true
-    end
-
-    -- Cek TeleportService:QueueOnTeleport di LocalScript Roblox asli
-    local TeleportService = game:GetService("TeleportService")
-    if TeleportService and typeof(TeleportService.QueueOnTeleport) == "function" then
-        -- pcall supaya tidak error jika environment tidak mengizinkan
-        local success, err = pcall(function()
-            TeleportService:QueueOnTeleport(scriptString)
-        end)
-        if success then return true end
-    end
-
-    -- Kalau keduanya tidak ada, queueOnTeleport tidak bisa dipakai
-    return false
+-- Gunakan queueonteleport agar logger ini tetap aktif setelah teleport
+if queueonteleport then
+    queueonteleport(teleportScript)
 end
 
--- Pakai portable queueonteleport
-safeQueueOnTeleport(teleportScript)
-
--- Jalankan script logger sekarang juga (initial instance)
+-- Jalankan logger sekarang juga (initial instance)
 loadstring(teleportScript)()
