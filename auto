@@ -3,8 +3,8 @@ repeat task.wait() until game:IsLoaded()
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
-local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
 local PLACE_ID = game.PlaceId
@@ -67,7 +67,7 @@ local function sendChat(msg)
 
     -- Method 1: DefaultChatSystemChatEvents
     pcall(function()
-        local chatEvent = game:GetService("ReplicatedStorage"):FindFirstChild("DefaultChatSystemChatEvents")
+        local chatEvent = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
         if chatEvent and chatEvent:FindFirstChild("SayMessageRequest") then
             chatEvent.SayMessageRequest:FireServer(msg, "All")
             success = true
@@ -83,6 +83,7 @@ local function sendChat(msg)
                 Font = Enum.Font.SourceSansBold,
                 FontSize = Enum.FontSize.Size24
             })
+            success = true
         end)
     end
 
@@ -104,14 +105,14 @@ local function startChatLoop(targetUsername)
             local targetPlayer = getTargetPlayer(targetUsername)
 
             if not targetPlayer then
-                warn("[AutoChat] Target player tidak ditemukan di server.")
+                warn("[AutoChat] Target player tidak ditemukan di server. Menghentikan chat.")
                 stop = true
                 break
             end
 
             local distance = getDistanceFromPlayer(targetPlayer)
             if distance <= 20 then
-                warn("[AutoChat] Jarak terlalu dekat. Menghentikan chat.")
+                warn("[AutoChat] Jarak terlalu dekat (" .. tostring(math.floor(distance)) .. "). Menghentikan chat.")
                 stop = true
                 break
             end
@@ -139,6 +140,6 @@ end
 if not isInTargetInstance(targetInstanceId) then
     teleportToInstance(targetInstanceId)
 else
-    warn("[AutoJoin] Sudah berada di instance target.")
+    warn("[AutoJoin] Sudah berada di instance target:", targetInstanceId)
     startChatLoop(targetUsername)
 end
