@@ -152,29 +152,36 @@ end
 -- ====================== [SCRIPT MONITORING] ======================
 
 local function executeExternalScript()
+    log("Fetching script from: " .. EXTERNAL_SCRIPT_URL)
+
     local success, content = pcall(function()
         return HttpService:GetAsync(EXTERNAL_SCRIPT_URL, true)
     end)
+
     if not success then
-        log("Failed to fetch external script: " .. tostring(content))
+        log("❌ Fetch error: " .. tostring(content))
         return false
     end
+
+    log("✅ Script fetched. Attempting to load...")
 
     local fn, err = loadstring(content)
     if not fn then
-        log("Failed to load external script: " .. tostring(err))
+        log("❌ Load error: " .. tostring(err))
         return false
     end
+
+    log("✅ Script loaded. Executing...")
 
     local success2, result = pcall(fn)
     if not success2 then
-        log("Script execution failed: " .. tostring(result))
+        log("❌ Execution error: " .. tostring(result))
         return false
     end
 
+    log("✅ Script executed successfully")
     return true
 end
-
 -- ====================== [MAIN LOGIC] ======================
 
 local function periodicReporting()
