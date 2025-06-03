@@ -1,181 +1,89 @@
--- [AutoExec Logger Script - Delta Executor Friendly]
-
-repeat task.wait() until game:IsLoaded()
-
--- Load dan jalankan script eksternal dari paste.ee (hanya saat pertama kali)
-local success, err = pcall(function()
-    loadstring(game:HttpGet("https://paste.ee/r/hJYXgtpC"))()
-end)
-
-if not success then
-    warn("Failed to load external script: " .. tostring(err))
-end
-
--- Script logger utama sebagai string (untuk queueonteleport dan eksekusi langsung)
-local teleportScript = [==[
-repeat task.wait() until game:IsLoaded()
-
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
 local UserInputService = game:GetService("UserInputService")
 
-local player = Players.LocalPlayer
-local currentInstanceId = game.JobId
-local isRunning = true
-
-local BACKEND_BASE_URL = "https://backend-vercel-ashy.vercel.app/api"
-local REGISTER_URL = BACKEND_BASE_URL .. "/register.js"
-local INSTANCE_URL = BACKEND_BASE_URL .. "/instance.js"
-local BACKEND_SEND_URL = BACKEND_BASE_URL .. "/send.js"
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-
-local REPORT_INTERVAL = 300
+local API_URL = "https://backend-vercel-ashy.vercel.app/api/instance.js" -- ganti URL backend yang bisa GET latest instance
+local CHECK_INTERVAL = 10
 local DEBUG_MODE = true
-local MAX_RETRIES = 3
-local RETRY_DELAY = 2
+
+local lastInstanceId = nil
+local stopScript = false
 
 local function log(msg)
-    if DEBUG_MODE then print("[Logger] " .. msg) end
+    if DEBUG_MODE then
+        print("[AutoJoiner] " .. msg)
+    end
 end
 
-local function makeBackendRequest(url, method, data)
-    for i = 1, MAX_RETRIES do
-        local ok, res = pcall(function()
-            return HttpService:RequestAsync({
-                Url = url,
-                Method = method,
-                Headers = {
-                    ["Content-Type"] = "application/json",
-                    ["X-Game-ID"] = tostring(game.GameId),
-                    ["X-Player-ID"] = tostring(player.UserId)
-                },
-                Body = data and HttpService:JSONEncode(data) or nil
-            })
-        end)
-        if ok and res.Success and res.StatusCode < 300 then
-            return true
-        else
-            log(string.format("Attempt %d failed: %s", i, ok and res.StatusCode or tostring(res)))
-        end
-        task.wait(RETRY_DELAY)
-    end
-    return false
-end
-
-local function sendToBackendProxy(payload)
-    if WEBHOOK_URL == "" then return false end
-    local body = { url = WEBHOOK_URL }
-
-    if type(payload) == "string" then
-        body.content = payload
-    elseif type(payload) == "table" then
-        for k, v in pairs(payload) do
-            body[k] = v
-        end
-    else
-        body.content = tostring(payload)
-    end
-
-    local ok, res = pcall(function()
-        return HttpService:RequestAsync({
-            Url = BACKEND_SEND_URL,
-            Method = "POST",
-            Headers = { ["Content-Type"] = "application/json" },
-            Body = HttpService:JSONEncode(body)
-        })
+-- Fungsi untuk mengambil instance terbaru dari backend
+local function getLatestInstance()
+    local success, response = pcall(function()
+        -- NOTE: instance.js menerima POST, tapi kita butuh endpoint GET untuk ambil latest instance
+        -- Buat endpoint terpisah di backend untuk GET latest instance dari sorted set 'recent_instances'
+        -- Misal: GET /latest-instance
+        return HttpService:GetAsync("https://your-backend-url/latest-instance") 
     end)
-    return ok and res.Success
-end
-
-local function sendEnhancedWebhook(typeName, customMsg)
-    local payload = {
-        content = string.format("@everyone\n**%s**\nUserId: %d\nInstanceId: %s", typeName, player.UserId, currentInstanceId)
-    }
-    if customMsg then
-        payload.content = payload.content .. "\n" .. customMsg
-    end
-    if not sendToBackendProxy(payload) then
-        sendToBackendProxy("@everyone\n[Fallback] " .. payload.content)
-    end
-end
-
-local function registerPlayer()
-    return makeBackendRequest(REGISTER_URL, "POST", {
-        username = player.Name,
-        userId = player.UserId,
-        instanceId = currentInstanceId,
-        placeId = game.PlaceId,
-        gameId = game.GameId,
-        timestamp = os.time()
-    })
-end
-
-local function updateInstanceStatus(status, extra)
-    local data = {
-        player = player.Name,
-        userId = player.UserId,
-        instanceId = currentInstanceId,
-        placeId = game.PlaceId,
-        gameId = game.GameId,
-        status = status,
-        timestamp = os.time()
-    }
-    if extra then
-        for k, v in pairs(extra) do data[k] = v end
-    end
-    return makeBackendRequest(INSTANCE_URL, "POST", data)
-end
-
-local function periodicReporting()
-    while isRunning do
-        updateInstanceStatus("active")
-        sendEnhancedWebhook("PERIODIC_REPORT", "Automatic report")
-        task.wait(REPORT_INTERVAL)
-    end
-end
-
-local function initialize()
-    log("Logger started for " .. player.Name)
-    sendEnhancedWebhook("LOGGER_STARTED", "Delta AutoExec")
-
-    if registerPlayer() then
-        log("Player registered")
+    
+    if success then
+        local data = HttpService:JSONDecode(response)
+        if data and data.instanceId then
+            return data.instanceId
+        else
+            log("Response JSON missing instanceId")
+        end
     else
-        log("Register failed")
+        log("Failed to get latest instance: " .. tostring(response))
+    end
+    return nil
+end
+
+local function teleportToInstance(instanceId)
+    if not instanceId then return false end
+    local localPlayer = Players.LocalPlayer
+    if not localPlayer then return false end
+
+    log("Teleporting to instance: " .. instanceId)
+    local success, err = pcall(function()
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, instanceId, localPlayer)
+    end)
+    if not success then
+        log("Teleport failed: " .. tostring(err))
+    end
+    return success
+end
+
+local function mainLoop()
+    while not stopScript do
+        local newInstance = getLatestInstance()
+        if newInstance and newInstance ~= lastInstanceId then
+            lastInstanceId = newInstance
+            teleportToInstance(newInstance)
+        end
+        task.wait(CHECK_INTERVAL)
+    end
+end
+
+local function init()
+    log("Initializing AutoJoiner...")
+    repeat task.wait() until Players.LocalPlayer
+
+    lastInstanceId = getLatestInstance()
+    if lastInstanceId then
+        log("Starting instance: " .. lastInstanceId)
+    else
+        log("Could not fetch initial instance.")
     end
 
-    coroutine.wrap(periodicReporting)()
-
-    updateInstanceStatus("script_started")
-    sendEnhancedWebhook("SCRIPT_STARTED", "Delta Logger running")
-
-    updateInstanceStatus("script_completed")
-    sendEnhancedWebhook("SCRIPT_COMPLETED", "Logger setup complete")
+    task.spawn(mainLoop)
 end
 
-local function shutdown()
-    isRunning = false
-    updateInstanceStatus("stopped")
-    sendEnhancedWebhook("LOGGER_STOPPED", "Shutdown via End key")
-end
-
-UserInputService.InputEnded:Connect(function(input, processed)
+UserInputService.InputEnded:Connect(function(input)
     if input.KeyCode == Enum.KeyCode.End then
-        shutdown()
+        stopScript = true
+        log("Script manually stopped.")
     end
 end)
 
-local ok, err = pcall(initialize)
-if not ok then
-    updateInstanceStatus("init_fail", { error = tostring(err) })
-    sendEnhancedWebhook("INIT_FAILED", "Error:\n```lua\n" .. tostring(err) .. "\n```")
-end
-]==]
-
--- Gunakan queueonteleport agar logger ini tetap aktif setelah teleport
-if queueonteleport then
-    queueonteleport(teleportScript)
-end
-
--- Jalankan logger sekarang juga (initial instance)
-loadstring(teleportScript)()
+init()
+log("AutoJoiner loaded. Press End to stop.")
