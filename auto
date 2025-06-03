@@ -1,21 +1,82 @@
+-- [Auto Joiner - Ambil Instance Terbaru dari Database]
 repeat task.wait() until game:IsLoaded()
 
-local HttpService = game:GetService("HttpService")
-local TARGET_USERNAME = "alimskri"
-local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/instance.js?username=" .. TARGET_USERNAME
+-- Konfigurasi
+local ID_GAME_TUJUAN = 126884695634066 -- Ganti dengan ID game target Anda
+local URL_API = "https://backend-vercel-ashy.vercel.app/api/instances" -- Endpoint API Anda
+local INTERVAL_PEMERIKSAAN = 30 -- Detik antara pemeriksaan
+local PERCOBAAN_MAX = 3 -- Maksimum percobaan fetch
+local DELAY_GAGAL = 10 -- Delay saat gagal teleport
 
-local function getTargetInstanceId()
-    local success, response = pcall(function()
-        return HttpService:GetAsync(BACKEND_URL)
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local Pemain = game:GetService("Players")
+
+-- Fungsi untuk mengambil instance terbaru dari database
+local function ambilInstanceTerbaru()
+    for percobaan = 1, PERCOBAAN_MAX do
+        local berhasil, respon = pcall(function()
+            return HttpService:GetAsync(URL_API.."?gameId="..ID_GAME_TUJUAN)
+        end)
+        
+        if berhasil then
+            local data = HttpService:JSONDecode(respon)
+            if data and data.instanceId then
+                print("Berhasil mendapatkan instance:", data.instanceId)
+                return data.instanceId
+            end
+        else
+            warn("Percobaan "..percobaan.." gagal: "..tostring(respon))
+            task.wait(2) -- Delay antar percobaan
+        end
+    end
+    return nil
+end
+
+-- Fungsi untuk join ke instance
+local function joinInstance(instanceId)
+    local berhasil, error = pcall(function()
+        if instanceId then
+            print("Mencoba teleport ke instance:", instanceId)
+            TeleportService:TeleportToPlaceInstance(ID_GAME_TUJUAN, instanceId, Pemain.LocalPlayer)
+        else
+            print("Mencoba join ke server random")
+            TeleportService:Teleport(ID_GAME_TUJUAN, Pemain.LocalPlayer)
+        end
     end)
-    if success then
-        print("Response from backend:", response)
-        local data = HttpService:JSONDecode(response)
-        print("Instance ID:", data.instanceId)
-        return data.instanceId
-    else
-        warn("Gagal mengambil instance:", response)
+    
+    if not berhasil then
+        warn("Gagal teleport: "..tostring(error))
+        return false
+    end
+    return true
+end
+
+-- Fungsi utama auto join
+local function mulaiAutoJoin()
+    while true do
+        -- Cek jika sudah berada di game tujuan
+        if game.PlaceId == ID_GAME_TUJUAN then
+            print("Sudah berada di game tujuan")
+            task.wait(INTERVAL_PEMERIKSAAN)
+            continue
+        end
+
+        print("Mencari instance terbaru dari database...")
+        local instanceId = ambilInstanceTerbaru()
+        
+        if instanceId then
+            if not joinInstance(instanceId) then
+                task.wait(DELAY_GAGAL) -- Delay jika gagal teleport
+            end
+        else
+            print("Tidak ditemukan instance, join ke server random")
+            joinInstance(nil)
+        end
+        
+        task.wait(INTERVAL_PEMERIKSAAN)
     end
 end
 
-getTargetInstanceId()
+-- Mulai proses auto join
+mulaiAutoJoin()
