@@ -65,17 +65,22 @@ end
 -- Fungsi untuk mengirim chat dengan fallback
 local function sendChat(msg)
     local success = false
+    print("[sendChat] Mengirim pesan:", msg)
 
     pcall(function()
         local chatEvent = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
         if chatEvent and chatEvent:FindFirstChild("SayMessageRequest") then
+            print("[sendChat] Mengirim via SayMessageRequest")
             chatEvent.SayMessageRequest:FireServer(msg, "All")
             success = true
+        else
+            print("[sendChat] SayMessageRequest tidak ditemukan")
         end
     end)
 
     if not success then
         pcall(function()
+            print("[sendChat] Mengirim via ChatMakeSystemMessage")
             StarterGui:SetCore("ChatMakeSystemMessage", {
                 Text = msg,
                 Color = Color3.fromRGB(255, 255, 255),
@@ -88,10 +93,12 @@ local function sendChat(msg)
 
     if not success then
         pcall(function()
+            print("[sendChat] Mengirim via Players:Chat")
             Players:Chat(msg)
         end)
     end
 end
+
 
 -- Chat loop, kirim pesan global tanpa sebut username target
 local function startChatLoop(targetUsername)
