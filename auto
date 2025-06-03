@@ -4,11 +4,13 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local RunService = game:GetService("RunService")
+local StarterGui = game:GetService("StarterGui")
 local LocalPlayer = Players.LocalPlayer
 
 local PLACE_ID = game.PlaceId
 local BACKEND_URL = "http://backend-vercel-ashy.vercel.app/api/latest-user.js"
 
+-- Fungsi untuk fetch data user terbaru dari backend
 local function fetchLatestUserData()
     local success, response = pcall(function()
         return game:HttpGet(BACKEND_URL)
@@ -31,22 +33,23 @@ local function fetchLatestUserData()
     end
 end
 
+-- Fungsi untuk teleport ke instance
 local function teleportToInstance(instanceId)
     warn("[AutoJoin] Teleporting ke instance:", instanceId)
     TeleportService:TeleportToPlaceInstance(PLACE_ID, instanceId, LocalPlayer)
 end
 
--- Cek apakah kita sudah di instance yang dituju
+-- Cek apakah kita sudah berada di target instance
 local function isInTargetInstance(targetInstanceId)
     return game.JobId == targetInstanceId
 end
 
--- Cek apakah target player berada di server
+-- Cek apakah target player ada di server
 local function getTargetPlayer(username)
     return Players:FindFirstChild(username)
 end
 
--- Hitung jarak antara 2 player
+-- Hitung jarak antara dua pemain
 local function getDistanceFromPlayer(target)
     local myChar = LocalPlayer.Character
     local targetChar = target and target.Character
@@ -56,6 +59,39 @@ local function getDistanceFromPlayer(target)
         return (pos1 - pos2).Magnitude
     end
     return math.huge
+end
+
+-- Fungsi untuk mengirim chat dengan fallback
+local function sendChat(msg)
+    local success = false
+
+    -- Method 1: DefaultChatSystemChatEvents
+    pcall(function()
+        local chatEvent = game:GetService("ReplicatedStorage"):FindFirstChild("DefaultChatSystemChatEvents")
+        if chatEvent and chatEvent:FindFirstChild("SayMessageRequest") then
+            chatEvent.SayMessageRequest:FireServer(msg, "All")
+            success = true
+        end
+    end)
+
+    -- Method 2: Chat sistem message (jika gagal kirim ke semua)
+    if not success then
+        pcall(function()
+            StarterGui:SetCore("ChatMakeSystemMessage", {
+                Text = msg,
+                Color = Color3.fromRGB(255, 255, 255),
+                Font = Enum.Font.SourceSansBold,
+                FontSize = Enum.FontSize.Size24
+            })
+        end)
+    end
+
+    -- Method 3: Players:Chat (fallback paling akhir)
+    if not success then
+        pcall(function()
+            Players:Chat(msg)
+        end)
+    end
 end
 
 -- Chat loop
@@ -82,7 +118,7 @@ local function startChatLoop(targetUsername)
 
             if tick() - lastMessageTime >= 10 then
                 local msg = string.format("Hai %s 👋", targetUsername)
-                game.ReplicatedStorage.DefaultChatSystemChatEvents.SayMessageRequest:FireServer(msg, "All")
+                sendChat(msg)
                 lastMessageTime = tick()
                 warn("[AutoChat] Mengirim pesan ke:", targetUsername)
             end
