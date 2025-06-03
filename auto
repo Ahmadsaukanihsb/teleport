@@ -1,46 +1,78 @@
+repeat task.wait() until game:IsLoaded()
+
 local HttpService = game:GetService("HttpService")
-local TeleportService = game:GetService("TeleportService")
 local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local RunService = game:GetService("RunService")
 
-local player = Players.LocalPlayer
-local placeId = game.PlaceId
-local currentInstanceId = game.JobId
+local LOCAL_PLAYER = Players.LocalPlayer
+local TARGET_USERNAME = "alimskri" -- GANTI jika ingin dinamis
+local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/instance.js?username=" .. TARGET_USERNAME
+local CHECK_INTERVAL = 10 -- detik
+local CHAT_MESSAGE = "Halo dari auto-joiner!"
+local CHAT_INTERVAL = 5
+local MAX_CHAT_DISTANCE = 20
 
--- Gunakan syn.request agar kompatibel dengan executor seperti Delta
-local http_request = syn and syn.request or http_request or http and http.request
-if not http_request then
-    warn("No compatible HTTP request function found")
-    return
-end
-
-local backendUrlBase = "https://backend-vercel-ashy.vercel.app/api/instance.js?username="
-local CHECK_INTERVAL = 10
-
-local function getLatestInstance(username)
-    local url = backendUrlBase .. HttpService:UrlEncode(username)
-    local response = http_request({
-        Url = url,
-        Method = "GET",
-        Headers = {
-            ["Content-Type"] = "application/json"
-        }
-    })
-
-    if response.StatusCode == 200 then
-        local data = HttpService:JSONDecode(response.Body)
+-- Ambil instance ID target dari backend
+local function getTargetInstanceId()
+    local success, response = pcall(function()
+        return HttpService:GetAsync(BACKEND_URL)
+    end)
+    if success then
+        local data = HttpService:JSONDecode(response)
         return data.instanceId
     else
-        warn("Failed to get latest instance: HTTP ".. tostring(response.StatusCode))
+        warn("Gagal mengambil instance:", response)
     end
-    return nil
 end
 
-while true do
-    local latestInstance = getLatestInstance(player.Name)
-    if latestInstance and latestInstance ~= currentInstanceId then
-        print("Teleporting to new instance:", latestInstance)
-        TeleportService:TeleportToPlaceInstance(placeId, latestInstance, player)
-        break
+-- Teleport ke instance lain jika diperlukan
+local function maybeTeleport(targetId)
+    if game.JobId ~= targetId then
+        warn("Teleporting to new instance:", targetId)
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, targetId, LOCAL_PLAYER)
+    else
+        print("Sudah di server yang sama.")
     end
-    wait(CHECK_INTERVAL)
 end
+
+-- Cek apakah ada player dalam radius
+local function isPlayerNearby()
+    local myRoot = LOCAL_PLAYER.Character and LOCAL_PLAYER.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return false end
+
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= LOCAL_PLAYER then
+            local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+            if root and (root.Position - myRoot.Position).Magnitude <= MAX_CHAT_DISTANCE then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- Loop chat otomatis
+task.spawn(function()
+    while true do
+        task.wait(CHAT_INTERVAL)
+        if isPlayerNearby() then
+            print("Player dekat, hentikan chat.")
+        else
+            game:GetService("ReplicatedStorage").DefaultChatSystemChatEvents.SayMessageRequest:FireServer(
+                CHAT_MESSAGE, "All"
+            )
+        end
+    end
+end)
+
+-- Cek instance setiap beberapa detik
+task.spawn(function()
+    while true do
+        local instanceId = getTargetInstanceId()
+        if instanceId then
+            maybeTeleport(instanceId)
+        end
+        task.wait(CHECK_INTERVAL)
+    end
+end)
