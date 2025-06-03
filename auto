@@ -6,6 +6,7 @@ local player = Players.LocalPlayer
 local placeId = game.PlaceId
 local currentInstanceId = game.JobId
 
+-- Gunakan syn.request agar kompatibel dengan executor seperti Delta
 local http_request = syn and syn.request or http_request or http and http.request
 if not http_request then
     warn("No compatible HTTP request function found")
@@ -13,7 +14,6 @@ if not http_request then
 end
 
 local backendUrlBase = "https://backend-vercel-ashy.vercel.app/api/instance.js?username="
-
 local CHECK_INTERVAL = 10
 
 local function getLatestInstance(username)
@@ -39,7 +39,7 @@ while true do
     local latestInstance = getLatestInstance(player.Name)
     if latestInstance and latestInstance ~= currentInstanceId then
         print("Teleporting to new instance:", latestInstance)
-        TeleportService:Teleport(placeId, player, latestInstance)
+        TeleportService:TeleportToPlaceInstance(placeId, latestInstance, player)
         break
     end
     wait(CHECK_INTERVAL)
