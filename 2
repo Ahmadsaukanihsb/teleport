@@ -3,7 +3,9 @@ local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local UserInputService = game:GetService("UserInputService")
 
-local API_URL = "https://backend-vercel-ashy.vercel.app/api/instance.js" -- ganti URL backend yang bisa GET latest instance
+-- Ganti ini dengan URL endpoint GET latest instance kamu yang benar
+local API_URL = "https://backend-vercel-ashy.vercel.app/api/latest-instance.js"
+
 local CHECK_INTERVAL = 10
 local DEBUG_MODE = true
 
@@ -16,15 +18,11 @@ local function log(msg)
     end
 end
 
--- Fungsi untuk mengambil instance terbaru dari backend
+-- Ambil instance terbaru dari backend
 local function getLatestInstance()
     local success, response = pcall(function()
-        -- NOTE: instance.js menerima POST, tapi kita butuh endpoint GET untuk ambil latest instance
-        -- Buat endpoint terpisah di backend untuk GET latest instance dari sorted set 'recent_instances'
-        -- Misal: GET /latest-instance
-        return HttpService:GetAsync("https://your-backend-url/latest-instance") 
+        return HttpService:GetAsync(API_URL)
     end)
-    
     if success then
         local data = HttpService:JSONDecode(response)
         if data and data.instanceId then
