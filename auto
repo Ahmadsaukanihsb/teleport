@@ -7,7 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 -- CONFIGURATION
-local API_URL = "https://backend-vercel-ashy.vercel.app/join.js" -- endpoint join.js
+local API_URL = "https://backend-vercel-ashy.vercel.app/instance.js" -- endpoint join.js
 local CHECK_INTERVAL = 10
 local CHAT_INTERVAL = 30
 local PROXIMITY_RADIUS = 20
