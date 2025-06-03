@@ -3,109 +3,92 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 -- CONFIGURATION
-local API_URL = "https://backend-vercel-ashy.vercel.app/check.js"  -- Your backend endpoint
-local CHECK_INTERVAL = 10  -- Seconds between instance checks
-local CHAT_INTERVAL = 30  -- Seconds between chat messages
-local PROXIMITY_RADIUS = 20  -- Studs
+local API_URL = "https://backend-vercel-ashy.vercel.app/check.js"
+local CHECK_INTERVAL = 10
+local CHAT_INTERVAL = 30
+local PROXIMITY_RADIUS = 20
 local DEBUG_MODE = true
 
--- Database of usernames (you can fetch this from your backend if needed)
 local DATABASE_USERS = {
-    "Player1",
-    "Player2",
-    "Player3"
+    "Player1", "Player2", "Player3"
 }
 
--- Global variables
 local lastInstanceId = nil
 local isChatting = false
 local shouldStopChatting = false
-local connection = nil
+local stopScript = false
 
--- Debug logging
 local function log(message)
     if DEBUG_MODE then
         print("[AutoJoiner] " .. message)
     end
 end
 
--- Check if player is in database
 local function isInDatabase(username)
-    for _, dbUser in pairs(DATABASE_USERS) do
-        if string.lower(tostring(dbUser)) == string.lower(tostring(username)) then
+    for _, dbUser in ipairs(DATABASE_USERS) do
+        if username:lower() == dbUser:lower() then
             return true
         end
     end
     return false
 end
 
--- Check for nearby players
 local function checkProximity()
     local localPlayer = Players.LocalPlayer
-    if not localPlayer or not localPlayer.Character then return false end
-    
-    local localRoot = localPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local char = localPlayer.Character
+    if not char then return false end
+
+    local localRoot = char:FindFirstChild("HumanoidRootPart")
     if not localRoot then return false end
-    
-    for _, player in pairs(Players:GetPlayers()) do
+
+    for _, player in ipairs(Players:GetPlayers()) do
         if player ~= localPlayer and player.Character then
-            local char = player.Character
-            local root = char:FindFirstChild("HumanoidRootPart")
-            
-            if root then
-                local distance = (localRoot.Position - root.Position).Magnitude
-                if distance <= PROXIMITY_RADIUS then
-                    return true
-                end
+            local root = player.Character:FindFirstChild("HumanoidRootPart")
+            if root and (localRoot.Position - root.Position).Magnitude <= PROXIMITY_RADIUS then
+                return true
             end
         end
     end
     return false
 end
 
--- Send chat message
 local function sendChatMessage(message)
-    if not ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents") then return end
-    
     local chatEvents = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
-    local sayMessageRequest = chatEvents:FindFirstChild("SayMessageRequest")
-    
-    if sayMessageRequest then
-        sayMessageRequest:FireServer(message, "All")
+    if chatEvents then
+        local say = chatEvents:FindFirstChild("SayMessageRequest")
+        if say then
+            say:FireServer(message, "All")
+        end
     end
 end
 
--- Chat loop
 local function startChatLoop()
     if isChatting then return end
-    
     isChatting = true
     shouldStopChatting = false
-    
-    spawn(function()
+
+    task.spawn(function()
         while isChatting and not shouldStopChatting do
             if checkProximity() then
-                log("Player detected nearby - stopping chat")
+                log("Nearby player detected. Stopping chat.")
                 shouldStopChatting = true
                 break
             end
-            
             sendChatMessage("Hello from auto joiner!")
-            wait(CHAT_INTERVAL)
+            task.wait(CHAT_INTERVAL)
         end
         isChatting = false
     end)
 end
 
--- Get latest instance from backend
 local function getLatestInstance()
     local success, response = pcall(function()
-        return HttpService:GetAsync(API_URL, false)
+        return HttpService:GetAsync(API_URL)
     end)
-    
+
     if success then
         local data = HttpService:JSONDecode(response)
         if data and data.instanceId then
@@ -115,11 +98,11 @@ local function getLatestInstance()
     return nil
 end
 
--- Teleport to instance
 local function teleportToInstance(instanceId)
     local localPlayer = Players.LocalPlayer
     if not localPlayer then return false end
-    
+
+    log("Teleporting to instance: " .. instanceId)
     local success, result = pcall(function()
         TeleportService:TeleportToPlaceInstance(
             game.PlaceId,
@@ -127,68 +110,54 @@ local function teleportToInstance(instanceId)
             localPlayer
         )
     end)
-    
+
     if not success then
         log("Teleport failed: " .. tostring(result))
     end
     return success
 end
 
--- Main loop
 local function mainLoop()
-    log("Starting main loop...")
-    
-    while true do
-        -- Check current players for database matches
-        for _, player in pairs(Players:GetPlayers()) do
+    while not stopScript do
+        for _, player in ipairs(Players:GetPlayers()) do
             if isInDatabase(player.Name) and not isChatting then
-                log("Found database player: " .. player.Name)
+                log("Database player detected: " .. player.Name)
                 startChatLoop()
                 break
             end
         end
-        
-        -- Check for new instance
-        local currentInstanceId = getLatestInstance()
-        if currentInstanceId and currentInstanceId ~= lastInstanceId then
-            log("New instance detected: " .. currentInstanceId)
-            lastInstanceId = currentInstanceId
-            teleportToInstance(currentInstanceId)
+
+        local newInstance = getLatestInstance()
+        if newInstance and newInstance ~= lastInstanceId then
+            lastInstanceId = newInstance
+            teleportToInstance(newInstance)
         end
-        
-        wait(CHECK_INTERVAL)
+
+        task.wait(CHECK_INTERVAL)
     end
 end
 
--- Initialize
 local function init()
     log("Initializing auto joiner...")
-    
-    -- Get initial instance
+    repeat task.wait() until Players.LocalPlayer
+
     lastInstanceId = getLatestInstance()
     if lastInstanceId then
-        log("Current instance: " .. lastInstanceId)
+        log("Initial instance: " .. lastInstanceId)
     else
-        log("Failed to get initial instance")
+        log("Failed to fetch initial instance.")
     end
-    
-    -- Start main loop
-    connection = RunService.Heartbeat:Connect(function()
-        pcall(mainLoop)
-    end)
+
+    task.spawn(mainLoop)
 end
 
--- Start the script
-init()
-
--- Cleanup on script termination
-game:GetService("UserInputService").InputEnded:Connect(function(input, processed)
-    if input.KeyCode == Enum.KeyCode.End then  -- Press End key to stop
-        if connection then
-            connection:Disconnect()
-            log("Script terminated")
-        end
+-- End key cleanup
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.End then
+        stopScript = true
+        log("Script manually terminated.")
     end
 end)
 
-log("Auto joiner script loaded. Press End to stop.")
+init()
+log("Auto joiner loaded. Press End to terminate.")
