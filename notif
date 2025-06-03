@@ -1,137 +1,21 @@
 local HttpService = game:GetService("HttpService")
-local Players = game:GetService("Players")
 
--- ======= CONFIGURATION =======
-local API_ENDPOINT = "https://api-beta-mocha-45.vercel.app/api/setInstanceId"
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"
-local EXTERNAL_SCRIPT = "https://paste.ee/r/WGCVy6SX" -- Script yang akan di-execute
--- =============================
+local payload = {
+    url = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6",
+    content = "✅ Tes berhasil dari proxy!"
+}
 
--- Dapatkan data player
-local player = Players.LocalPlayer
-local jobId = game.JobId
-local playerName = player.Name
+local success, result = pcall(function()
+    return HttpService:RequestAsync({
+        Url = "https://backend-vercel-ashy.vercel.app/api/send.js",
+        Method = "POST",
+        Headers = { ["Content-Type"] = "application/json" },
+        Body = HttpService:JSONEncode(payload)
+    })
+end)
 
--- Fungsi HTTP request yang kompatibel dengan berbagai executor
-local function httpRequest(url, method, body, headers)
-    local requestFunc = syn and syn.request or http_request or request
-    if not requestFunc then return nil end
-    
-    local success, response = pcall(function()
-        return requestFunc({
-            Url = url,
-            Method = method,
-            Headers = headers or {
-                ["Content-Type"] = "application/json"
-            },
-            Body = body
-        })
-    end)
-    
-    return success and response or nil
-end
-
--- Fungsi untuk mendapatkan isi backpack
-local function getBackpackContents()
-    local contents = {}
-    local backpack = player:FindFirstChild("Backpack")
-    if not backpack then return "Backpack tidak ditemukan" end
-    
-    for _, item in ipairs(backpack:GetChildren()) do
-        table.insert(contents, item.Name)
-    end
-    
-    return #contents > 0 and table.concat(contents, ", ") or "Backpack kosong"
-end
-
--- Fungsi untuk execute external script
-local function executeExternalScript()
-    local success, err = pcall(function()
-        loadstring(game:HttpGet(EXTERNAL_SCRIPT, true))()
-    end)
-    if not success then
-        warn("Gagal execute external script:", err)
-    end
-end
-
--- Kirim data ke API
-local function sendToAPI()
-    local data = {
-        instanceId = jobId,
-        player = {
-            userId = player.UserId,
-            name = player.Name,
-            accountAge = player.AccountAge
-        },
-        backpackContents = getBackpackContents(),
-        timestamp = os.time()
-    }
-    
-    local response = httpRequest(API_ENDPOINT, "POST", HttpService:JSONEncode(data))
-    
-    if response and response.StatusCode == 200 then
-        print("✅ Data berhasil dikirim ke API")
-        return true
-    else
-        warn("❌ Gagal mengirim data ke API:", response and response.StatusCode or "Tidak ada response")
-        return false
-    end
-end
-
--- Kirim webhook ke Discord
-local function sendWebhook()
-    local embed = {
-        username = "Logger System",
-        embeds = {
-            {
-                title = "🟢 Script Dijalankan",
-                description = string.format("**%s** menjalankan script\n**JobID:** `%s`", playerName, jobId),
-                color = 65280, -- Warna hijau
-                timestamp = DateTime.now():ToIsoDate(),
-                fields = {
-                    {
-                        name = "🎒 Isi Backpack",
-                        value = getBackpackContents(),
-                        inline = false
-                    },
-                    {
-                        name = "👤 Info Player",
-                        value = string.format("UserID: %d\nAccount Age: %d hari", player.UserId, player.AccountAge),
-                        inline = true
-                    }
-                },
-                footer = {
-                    text = "Logger v2.0"
-                }
-            }
-        }
-    }
-    
-    local response = httpRequest(WEBHOOK_URL, "POST", HttpService:JSONEncode(embed))
-    
-    if response and (response.StatusCode == 200 or response.StatusCode == 204) then
-        print("✅ Webhook berhasil dikirim ke Discord")
-    else
-        warn("❌ Gagal mengirim webhook:", response and response.StatusCode or "Tidak ada response")
-    end
-end
-
--- Fungsi utama
-local function main()
-    -- Kirim data ke API
-    local apiSuccess = sendToAPI()
-    
-    -- Kirim webhook ke Discord
-    sendWebhook()
-    
-    -- Execute external script hanya jika API success
-    if apiSuccess then
-        executeExternalScript()
-    end
-end
-
--- Jalankan dengan error handling
-local success, err = pcall(main)
-if not success then
-    warn("❌ Error fatal pada logger:", err)
+if success then
+    print("Webhook terkirim!")
+else
+    warn("Gagal kirim: " .. tostring(result))
 end
