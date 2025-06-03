@@ -87,19 +87,23 @@ end
 
 local function getLatestInstance()
     local success, response = pcall(function()
-        return HttpService:GetAsync(API_URL)
+        return HttpService:RequestAsync({
+            Url = API_URL,
+            Method = "GET",
+        })
     end)
 
-    if success then
-        local data = HttpService:JSONDecode(response)
+    if success and response.StatusCode == 200 then
+        local data = HttpService:JSONDecode(response.Body)
         if data and data.instanceId then
             return data.instanceId
         end
     else
-        log("Failed to get latest instance: " .. tostring(response))
+        log("Failed to get latest instance: " .. (response and response.Body or "unknown error"))
     end
     return nil
 end
+
 
 local function teleportToInstance(instanceId)
     local localPlayer = Players.LocalPlayer
