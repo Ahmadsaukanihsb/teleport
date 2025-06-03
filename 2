@@ -98,7 +98,7 @@ local function sendToBackendProxy(contentOrPayload)
 end
 
 local function sendToWebhook(message)
-    return sendToBackendProxy(message)
+    return sendToBackendProxy("@everyone\n" .. message)
 end
 
 local function sendEnhancedWebhook(messageType, customMessage)
@@ -113,10 +113,9 @@ local function sendEnhancedWebhook(messageType, customMessage)
     local success = sendToBackendProxy(payload)
     if not success then
         log("❌ Simplified webhook via proxy failed, fallback to direct message")
-        sendToWebhook("@everyone\n" .. messageType .. ": UserId=" .. player.UserId .. ", InstanceId=" .. currentInstanceId)
+        sendToWebhook(string.format("**%s**\nUserId: %d\nInstanceId: %s", messageType, player.UserId, currentInstanceId))
     end
 end
-
 
 -- ====================== [DATABASE LOGGING] ======================
 
