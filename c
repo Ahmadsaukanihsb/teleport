@@ -1,140 +1,53 @@
+repeat task.wait() until game:IsLoaded()
+
 local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
 local Players = game:GetService("Players")
 
 local player = Players.LocalPlayer
-local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/register.js"
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1378086156624990361/8qHKxSBQ8IprT1qFn1KkHDWsyRfKXPJkS_4OYzMkBC-PIhGClm0v36uIgzrVwtU1zXh6"  -- Ganti dengan webhook Anda
-local RETRY_LIMIT = 3
-local RETRY_DELAY = 2
-local DEBOUNCE_TIME = 30
+local PLACE_ID = game.PlaceId
 
-local lastSendTime = 0
+-- Ganti URL ini dengan endpoint backend kamu
+local API_URL = "http://backend-vercel-ashy.vercel.app/api/latest-user.js"
 
--- Fungsi untuk mengirim ke backend Vercel
-local function sendToBackend(data)
+-- Fungsi ambil data dari backend
+local function getLatestUserAndInstance()
     local success, response = pcall(function()
-        return HttpService:RequestAsync({
-            Url = BACKEND_URL,
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json",
-                ["X-Game-ID"] = game.GameId
-            },
-            Body = HttpService:JSONEncode(data)
-        })
+        return game:HttpGet(API_URL)
     end)
-    
+
     if not success then
-        warn("[Backend] Request failed:", response)
-        return false
+        warn("[AutoJoiner] Gagal ambil data dari API:", response)
+        return nil
     end
-    
-    return response.StatusCode == 200
-end
 
--- Fungsi untuk mengirim ke webhook (Discord)
-local function sendToWebhook(data)
-    local embed = {
-        {
-            title = "Player Joined",
-            description = string.format(
-                "**%s** joined instance\n**UserID**: %d\n**Game**: [%d](https://www.roblox.com/games/%d)",
-                data.username, data.userId, data.placeId, data.placeId
-            ),
-            color = 65280,  -- Warna hijau
-            fields = {
-                {
-                    name = "Instance ID",
-                    value = data.instanceId,
-                    inline = true
-                },
-                {
-                    name = "Timestamp",
-                    value = os.date("%Y-%m-%d %H:%M:%S", data.timestamp),
-                    inline = true
-                }
-            },
-            footer = {
-                text = "Tracker System"
-            }
-        }
-    }
-    
-    local success, response = pcall(function()
-        return HttpService:RequestAsync({
-            Url = WEBHOOK_URL,
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = HttpService:JSONEncode({
-                content = nil,
-                embeds = embed
-            })
-        })
+    local ok, data = pcall(function()
+        return HttpService:JSONDecode(response)
     end)
-    
-    if not success then
-        warn("[Webhook] Request failed:", response)
-        return false
-    end
-    
-    return response.StatusCode == 204
-end
 
--- Fungsi utama dengan retry mechanism
-local function sendData()
-    if os.time() - lastSendTime < DEBOUNCE_TIME then
-        return false
-    end
-    
-    local data = {
-        username = player.Name,
-        userId = player.UserId,
-        instanceId = game.JobId,
-        timestamp = os.time(),
-        placeId = game.PlaceId,
-        gameId = game.GameId
-    }
-    
-    lastSendTime = os.time()
-    
-    -- Kirim ke kedua tujuan secara parallel
-    task.spawn(function()
-        for i = 1, RETRY_LIMIT do
-            if sendToBackend(data) then break end
-            if i < RETRY_LIMIT then task.wait(RETRY_DELAY) end
-        end
-    end)
-    
-    task.spawn(function()
-        for i = 1, RETRY_LIMIT do
-            if sendToWebhook(data) then break end
-            if i < RETRY_LIMIT then task.wait(RETRY_DELAY) end
-        end
-    end)
-    
-    return true
-end
-
--- Sistem event handlers
-local function init()
-    if player.Character then
-        sendData()
+    if ok and data and data.instanceId then
+        return data.username, data.instanceId
     else
-        player.CharacterAdded:Connect(sendData)
-    end
-    
-    -- Periodic update (opsional)
-    while true do
-        task.wait(300)  -- Kirim ulang setiap 5 menit
-        sendData()
+        warn("[AutoJoiner] Gagal decode JSON atau tidak ada instanceId")
+        return nil
     end
 end
 
--- Inisialisasi
-task.spawn(init)
+-- Fungsi teleport ke instance
+local function teleportToInstance(instanceId)
+    if not instanceId or instanceId == "" then
+        warn("[AutoJoiner] instanceId kosong, tidak bisa teleport")
+        return
+    end
 
--- Handle disconnect
-game:GetService("NetworkClient").Disconnection:Connect(function()
-    sendData()
-    print("[Logger] Final data sent before disconnect")
-end)
+    warn("[AutoJoiner] Teleporting ke instance:", instanceId)
+    TeleportService:TeleportToPlaceInstance(PLACE_ID, instanceId, player)
+end
+
+-- Eksekusi utama
+local username, instanceId = getLatestUserAndInstance()
+if instanceId then
+    teleportToInstance(instanceId)
+else
+    warn("[AutoJoiner] Tidak ada instanceId yang valid, teleport dibatalkan")
+end
