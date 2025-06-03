@@ -101,7 +101,7 @@ local function startChatLoop(targetUsername)
             end
 
             if tick() - lastMessageTime >= 10 then
-                local msg = "Halo semua! 👋"  -- Pesan global, bisa diubah sesuai kebutuhan
+                local msg = "dshajkdhasjkhjkas"  -- Pesan global, bisa diubah sesuai kebutuhan
                 sendChat(msg)
                 lastMessageTime = tick()
                 warn("[AutoChat] Mengirim pesan global:", msg)
