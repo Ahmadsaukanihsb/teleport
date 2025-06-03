@@ -142,9 +142,18 @@ local function sendToBackendProxy(contentOrPayload)
     elseif type(contentOrPayload) == "table" then
         if contentOrPayload.embeds then
             payload.embeds = contentOrPayload.embeds
+            if contentOrPayload.content then
+                payload.content = contentOrPayload.content
+            end
         else
-            payload.content = HttpService:JSONEncode(contentOrPayload)
+            -- Jika bukan embed, langsung gabungkan semua field ke payload
+            for k, v in pairs(contentOrPayload) do
+                payload[k] = v
+            end
         end
+    else
+        -- fallback jika tipe lain (sebaiknya gak sampai sini)
+        payload.content = tostring(contentOrPayload)
     end
 
     local success, response = pcall(function()
@@ -166,6 +175,7 @@ local function sendToBackendProxy(contentOrPayload)
         return true
     end
 end
+
 
 local function sendToWebhook(message)
     return sendToBackendProxy(message)
