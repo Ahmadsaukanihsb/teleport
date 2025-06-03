@@ -9,7 +9,7 @@ local LocalPlayer = Players.LocalPlayer
 
 local PLACE_ID = game.PlaceId
 local BACKEND_URL = "http://backend-vercel-ashy.vercel.app/api/latest-user.js"
-local CHECK_INTERVAL = 15 -- detik untuk cek data terbaru
+local CHECK_INTERVAL = 5 -- detik untuk cek data terbaru
 
 -- Fungsi untuk fetch data user terbaru dari backend
 local function fetchLatestUserData()
