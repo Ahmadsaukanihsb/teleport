@@ -1,79 +1,47 @@
-repeat task.wait() until game:IsLoaded()
-
 local HttpService = game:GetService("HttpService")
-local TeleportService = game:GetService("TeleportService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local TeleportService = game:GetService("TeleportService")
 
-local player = Players.LocalPlayer
-local PLACE_ID = game.PlaceId
-local API_BASE = "https://backend-vercel-ashy.vercel.app/api"
-
-local CHAT_ENABLED = false
-local CHAT_RADIUS = 20
-local CHECK_INTERVAL = 5
-
-local targetUserId = nil
+local myPlayer = Players.LocalPlayer
+local backendUrl = "https://backend-vercel-ashy.vercel.app/api/register.js" -- endpoint backend yang mengembalikan list username + instanceId
+local checkInterval = 10 -- detik cek instance baru
+local currentInstanceId = nil
 local targetUsername = nil
 
--- Ambil target userId dan username dari backend berdasarkan user lokal
-local function fetchTarget()
-    local url = string.format("%s/get-target?userid=%d", API_BASE, player.UserId)
+-- Fungsi dapatkan list username + instanceId dari backend
+local function getUsersInstances()
     local success, result = pcall(function()
-        return game:HttpGet(url)
+        local response = HttpService:GetAsync(backendUrl)
+        return HttpService:JSONDecode(response)
     end)
-    if not success then
-        warn("Gagal fetch target:", result)
-        return nil, nil
+    if success and type(result) == "table" then
+        return result
+    else
+        return {}
     end
-
-    local ok, data = pcall(function()
-        return HttpService:JSONDecode(result)
-    end)
-    if not ok or not data.userId or not data.username then
-        warn("Response target tidak valid")
-        return nil, nil
-    end
-
-    return data.userId, data.username
 end
 
--- Ambil instance user target dari backend berdasarkan userId
-local function getUserInstance(userId)
-    local url = string.format("%s/user-instance?userid=%d", API_BASE, userId)
-    local success, result = pcall(function()
-        return game:HttpGet(url)
-    end)
-    if not success then
-        warn("Gagal fetch user instance:", result)
-        return nil
+-- Fungsi cari username dan instanceId yang cocok dari list
+local function findTargetUserInstance(usersInstances)
+    for _, userData in ipairs(usersInstances) do
+        if userData.username == myPlayer.Name then
+            return userData.instanceId
+        end
     end
-
-    local ok, data = pcall(function()
-        return HttpService:JSONDecode(result)
-    end)
-    if not ok or not data.instanceId then
-        return nil
-    end
-    return data.instanceId
+    return nil
 end
 
--- Teleport ke server instance user target jika beda instance
-local function teleportToUserInstance(userInstance)
-    if userInstance ~= game.JobId then
-        print("Teleport ke instance user target:", userInstance)
-        TeleportService:TeleportToPlaceInstance(PLACE_ID, userInstance, player)
-        return true
-    end
-    return false
-end
-
--- Cek jarak player lain ke player lokal
+-- Fungsi cek apakah player lain dalam radius tertentu
 local function isPlayerNearby(radius)
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-            local dist = (p.Character.HumanoidRootPart.Position - player.Character.HumanoidRootPart.Position).Magnitude
-            if dist < radius then
+    local myCharacter = myPlayer.Character
+    if not myCharacter or not myCharacter.PrimaryPart then return false end
+    local myPos = myCharacter.PrimaryPart.Position
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= myPlayer and player.Character and player.Character.PrimaryPart then
+            local distance = (player.Character.PrimaryPart.Position - myPos).Magnitude
+            if distance <= radius then
                 return true
             end
         end
@@ -81,66 +49,48 @@ local function isPlayerNearby(radius)
     return false
 end
 
--- Fungsi untuk mengontrol chat (aktif / stop)
-local function updateChat()
-    if not CHAT_ENABLED then
-        print("Chat dimatikan.")
-        -- Sesuaikan di sini untuk men-disable chat di game kamu
+-- Fungsi chat jika satu server dan tidak ada player dekat
+local function chatIfAllowed()
+    if not myPlayer.Character or not myPlayer.Character.PrimaryPart then return end
+
+    -- Cek apakah target user ada di server (bisa sesuaikan dengan myPlayer.Name atau username lain)
+    local targetPlayer = Players:FindFirstChild(targetUsername)
+    if targetPlayer and targetPlayer.Character and targetPlayer.Character.PrimaryPart then
+        if not isPlayerNearby(20) then
+            myPlayer:Chat("Hello, I'm in the same server!")
+        end
+    end
+end
+
+-- Fungsi teleport ke instance baru
+local function teleportToInstance(newInstanceId)
+    local placeId = tonumber(newInstanceId) or 0
+    if placeId > 0 then
+        TeleportService:Teleport(placeId, myPlayer)
     else
-        print("Chat diaktifkan.")
-        -- Sesuaikan di sini untuk mengaktifkan chat di game kamu
+        print("InstanceId invalid:", newInstanceId)
     end
 end
 
 -- Loop utama
-while task.wait(CHECK_INTERVAL) do
-    if not targetUserId or not targetUsername then
-        targetUserId, targetUsername = fetchTarget()
-        if not targetUserId or not targetUsername then
-            warn("Target user belum tersedia, menunggu data dari backend...")
-            CHAT_ENABLED = false
-            updateChat()
-            continue
-        else
-            print("Target user didapat:", targetUsername, "UserId:", targetUserId)
+spawn(function()
+    while true do
+        local usersInstances = getUsersInstances()
+        local instanceId = findTargetUserInstance(usersInstances)
+        
+        if instanceId and instanceId ~= currentInstanceId then
+            currentInstanceId = instanceId
+            targetUsername = myPlayer.Name  -- target username disamakan dengan player sendiri
+            print("Instance terbaru untuk " .. targetUsername .. ": " .. currentInstanceId)
+            teleportToInstance(currentInstanceId)
         end
+
+        wait(checkInterval)
     end
+end)
 
-    local userInstance = getUserInstance(targetUserId)
-    if userInstance then
-        local teleported = teleportToUserInstance(userInstance)
-        if teleported then
-            -- Teleport akan reload script, so break loop
-            break
-        end
-
-        if game.JobId == userInstance then
-            -- Pastikan target ada di server ini
-            local targetInServer = false
-            for _, p in pairs(Players:GetPlayers()) do
-                if p.Name == targetUsername then
-                    targetInServer = true
-                    break
-                end
-            end
-
-            if targetInServer then
-                if isPlayerNearby(CHAT_RADIUS) then
-                    CHAT_ENABLED = false
-                else
-                    CHAT_ENABLED = true
-                end
-            else
-                -- Target tidak ada di server ini
-                CHAT_ENABLED = false
-            end
-        else
-            CHAT_ENABLED = false
-        end
-        updateChat()
-    else
-        warn("User target tidak ditemukan di database.")
-        CHAT_ENABLED = false
-        updateChat()
-    end
-end
+-- Loop chat
+RunService.Heartbeat:Connect(function()
+    chatIfAllowed()
+    wait(5)
+end)
