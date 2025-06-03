@@ -1,67 +1,44 @@
+repeat task.wait() until game:IsLoaded()
+
 local HttpService = game:GetService("HttpService")
-local TeleportService = game:GetService("TeleportService")
 local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
 
-local BACKEND_URL = "https://backend-vercel-ashy.vercel.app/api/latest-user.js"
-local RETRY_DELAY = 5
-local MAX_RETRIES = 3
+local player = Players.LocalPlayer
+local BACKEND_BASE_URL = "https://backend-vercel-ashy.vercel.app/api"
+local INSTANCE_URL = BACKEND_BASE_URL .. "/latest-instance.js"
 
-local function log(msg)
-    print("[AutoJoiner] " .. msg)
-end
+local CHECK_INTERVAL = 10 -- cek tiap 10 detik
 
-local function fetchLatestUser()
-    for i = 1, MAX_RETRIES do
-        local success, response = pcall(function()
-            return HttpService:GetAsync(BACKEND_URL, true)
-        end)
-        if success then
-            local data
-            local ok, decodeErr = pcall(function()
-                data = HttpService:JSONDecode(response)
-            end)
-            if ok and data and data.instanceId and data.username then
-                return data.username, data.instanceId
-            else
-                log("Failed to decode JSON or missing fields")
-            end
-        else
-            log("Attempt "..i.." failed to fetch: " .. tostring(response))
-        end
-        task.wait(RETRY_DELAY)
-    end
-    return nil, nil
-end
+local currentInstanceId = game.JobId
 
-local function autoJoinLatestInstance()
-    local username, instanceId = fetchLatestUser()
-    if not instanceId then
-        log("Failed to get latest instanceId from backend")
-        return
-    end
-    
-    log("Latest user: " .. username .. ", instanceId: " .. instanceId)
-    
-    if instanceId == game.JobId then
-        log("Already in the latest instance")
-        return
-    end
-
-    -- Teleport ke instance yang didapat
-    -- Kalau ini game Roblox kamu, gunakan TeleportService:TeleportToPrivateServer jika ada
-    -- Contoh menggunakan TeleportService:TeleportToPlaceInstance
-    local placeId = game.PlaceId
-    local privateServerId = instanceId
-    
-    local success, err = pcall(function()
-        TeleportService:TeleportToPlaceInstance(placeId, privateServerId, Players.LocalPlayer)
+local function getActiveInstances()
+    local success, response = pcall(function()
+        return HttpService:GetAsync(INSTANCE_URL .. "?username=" .. player.Name)
     end)
+
     if success then
-        log("Teleporting to instance: " .. instanceId)
+        local data = HttpService:JSONDecode(response)
+        return data -- diasumsikan data berupa table dengan instanceId
     else
-        log("Failed to teleport: " .. tostring(err))
+        warn("Gagal ambil data instance dari backend")
+        return nil
     end
 end
 
--- Jalankan auto join
-autoJoinLatestInstance()
+local function autoJoinNewInstance()
+    while true do
+        local data = getActiveInstances()
+        if data and data.instanceId and data.instanceId ~= currentInstanceId then
+            print("[AutoJoiner] Instance baru ditemukan: " .. data.instanceId .. ", teleporting...")
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, data.instanceId, player)
+            return -- teleport akan memindahkan player, stop loop di sini
+        else
+            print("[AutoJoiner] Tidak ada instance baru, tetap di " .. currentInstanceId)
+        end
+        task.wait(CHECK_INTERVAL)
+    end
+end
+
+-- Jalankan auto joiner
+autoJoinNewInstance()
