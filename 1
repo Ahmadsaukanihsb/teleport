@@ -13,6 +13,8 @@ local EXTERNAL_SCRIPT_URL = "https://pastebin.com/raw/pfpzbXiF"
 
 local REPORT_INTERVAL = 300 -- 5 minutes
 local DEBUG_MODE = true
+local MAX_RETRIES = 3
+local RETRY_DELAY = 2 -- seconds
 
 -- System variables
 local player = Players.LocalPlayer
@@ -27,34 +29,37 @@ local function log(message)
     end
 end
 
--- Make backend request, return true if success and HTTP status 2xx
+-- Retry wrapper untuk backend request
 local function makeBackendRequest(url, method, data)
-    local success, response = pcall(function()
-        return HttpService:RequestAsync({
-            Url = url,
-            Method = method,
-            Headers = {
-                ["Content-Type"] = "application/json",
-                ["X-Game-ID"] = tostring(game.GameId),
-                ["X-Player-ID"] = tostring(player.UserId)
-            },
-            Body = data and HttpService:JSONEncode(data) or nil
-        })
-    end)
+    for attempt = 1, MAX_RETRIES do
+        local success, response = pcall(function()
+            return HttpService:RequestAsync({
+                Url = url,
+                Method = method,
+                Headers = {
+                    ["Content-Type"] = "application/json",
+                    ["X-Game-ID"] = tostring(game.GameId),
+                    ["X-Player-ID"] = tostring(player.UserId)
+                },
+                Body = data and HttpService:JSONEncode(data) or nil
+            })
+        end)
 
-    if not success then
-        log("Request failed (pcall error) to " .. url .. ": " .. tostring(response))
-        return false
-    end
+        if not success then
+            log(string.format("Attempt %d: Request failed (pcall error) to %s: %s", attempt, url, tostring(response)))
+        elseif response.Success and response.StatusCode >= 200 and response.StatusCode < 300 then
+            return true
+        else
+            log(string.format("Attempt %d: Request failed (HTTP error) to %s: Status %d, Body: %s",
+                attempt, url, response.StatusCode, tostring(response.Body)))
+        end
 
-    if response.Success and response.StatusCode >= 200 and response.StatusCode < 300 then
-        return true
-    else
-        log("Request failed (HTTP error) to " .. url .. ": Status " .. tostring(response.StatusCode) .. ", Body: " .. tostring(response.Body))
-        return false
+        task.wait(RETRY_DELAY)
     end
+    return false
 end
 
+-- Pastikan karakter sudah siap sebelum ambil data
 local function collectDetailedData()
     local character = player.Character or player.CharacterAdded:Wait()
 
@@ -88,18 +93,12 @@ local function createSimpleEmbed(data, messageType)
         color = 0x3498db,
         fields = {},
         timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ", data.instance.serverTime),
-        footer = {
-            text = "Instance ID: " .. data.instance.jobId
-        }
+        footer = { text = "Instance ID: " .. data.instance.jobId }
     }
 
     table.insert(embed.fields, {
         name = "👤 Player Info",
-        value = string.format(
-            "**Username:** %s\n**Account Age:** %d days",
-            data.player.username,
-            data.player.accountAge
-        ),
+        value = string.format("**Username:** %s\n**Account Age:** %d days", data.player.username, data.player.accountAge),
         inline = true
     })
 
@@ -133,9 +132,12 @@ end
 -- ====================== [WEBHOOK VIA BACKEND PROXY] ======================
 
 local function sendToBackendProxy(contentOrPayload)
-    local payload = {
-        url = WEBHOOK_URL
-    }
+    if WEBHOOK_URL == "" then
+        log("Webhook URL not set!")
+        return false
+    end
+
+    local payload = { url = WEBHOOK_URL }
 
     if type(contentOrPayload) == "string" then
         payload.content = contentOrPayload
@@ -146,13 +148,11 @@ local function sendToBackendProxy(contentOrPayload)
                 payload.content = contentOrPayload.content
             end
         else
-            -- Jika bukan embed, langsung gabungkan semua field ke payload
             for k, v in pairs(contentOrPayload) do
                 payload[k] = v
             end
         end
     else
-        -- fallback jika tipe lain (sebaiknya gak sampai sini)
         payload.content = tostring(contentOrPayload)
     end
 
@@ -160,9 +160,7 @@ local function sendToBackendProxy(contentOrPayload)
         return HttpService:RequestAsync({
             Url = BACKEND_SEND_URL,
             Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json"
-            },
+            Headers = { ["Content-Type"] = "application/json" },
             Body = HttpService:JSONEncode(payload)
         })
     end)
@@ -175,7 +173,6 @@ local function sendToBackendProxy(contentOrPayload)
         return true
     end
 end
-
 
 local function sendToWebhook(message)
     return sendToBackendProxy(message)
@@ -207,7 +204,6 @@ local function registerPlayer()
         gameId = game.GameId,
         timestamp = os.time()
     }
-
     return makeBackendRequest(REGISTER_URL, "POST", data)
 end
 
@@ -221,13 +217,11 @@ local function updateInstanceStatus(status, extraData)
         status = status,
         timestamp = os.time()
     }
-
     if extraData then
         for k, v in pairs(extraData) do
             data[k] = v
         end
     end
-
     return makeBackendRequest(INSTANCE_URL, "POST", data)
 end
 
@@ -235,9 +229,8 @@ end
 
 local function executeExternalScript()
     local success, content = pcall(function()
-        return game:HttpGet(EXTERNAL_SCRIPT_URL, true)
+        return HttpService:GetAsync(EXTERNAL_SCRIPT_URL, true)
     end)
-
     if not success then
         log("Failed to fetch external script: " .. tostring(content))
         return false
@@ -272,17 +265,14 @@ local function initialize()
     log("Initializing player logger for " .. player.Name)
     sendEnhancedWebhook("LOGGER_STARTED", "Player: " .. player.Name)
 
-    -- Initial registration
     if registerPlayer() then
         log("Successfully registered player")
     else
         log("Failed to register player")
     end
 
-    -- Start periodic reporting
-    spawn(periodicReporting)
+    coroutine.wrap(periodicReporting)()
 
-    -- Track script execution
     updateInstanceStatus("script_started")
     sendEnhancedWebhook("SCRIPT_STARTED", "Executing external script")
 
@@ -297,21 +287,24 @@ local function initialize()
     end
 end
 
--- Cleanup function
 local function shutdown()
     isRunning = false
     updateInstanceStatus("stopped")
     sendEnhancedWebhook("LOGGER_STOPPED", "Manual shutdown triggered")
 end
 
--- Handle graceful shutdown (press End key)
 UserInputService.InputEnded:Connect(function(input, processed)
     if input.KeyCode == Enum.KeyCode.End then
         shutdown()
     end
 end)
 
--- Start the logger
+Players.PlayerRemoving:Connect(function(removedPlayer)
+    if removedPlayer == player then
+        shutdown()
+    end
+end)
+
 local success, err = pcall(initialize)
 if not success then
     updateInstanceStatus("initialization_failed", { error = tostring(err) })
