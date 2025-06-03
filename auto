@@ -1,41 +1,49 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
-local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local currentInstanceId = game.JobId
 
 local BACKEND_LATEST_USER_URL = "https://backend-vercel-ashy.vercel.app/api/latest-user.js"
-
 local TARGET_RADIUS = 20
-local CHAT_MESSAGE = "dsadsadsad!"
+local CHAT_MESSAGE = "dsadsadsa!"
 
 local isChatting = false
+local cachedUsername, cachedInstanceId
+local lastFetch = 0
+local FETCH_COOLDOWN = 15 -- detik
 
--- Fungsi fetch username & instance terbaru
+-- Fungsi fetch dengan syn.request
 local function fetchLatestUser()
+    if (tick() - lastFetch) < FETCH_COOLDOWN and cachedInstanceId then
+        return cachedUsername, cachedInstanceId
+    end
+
     local success, response = pcall(function()
-        return HttpService:GetAsync(BACKEND_LATEST_USER_URL)
+        return syn.request({
+            Url = BACKEND_LATEST_USER_URL,
+            Method = "GET"
+        })
     end)
-    if success then
-        local data = HttpService:JSONDecode(response)
-        return data.username, data.instanceId
+
+    if success and response.StatusCode == 200 then
+        local data = HttpService:JSONDecode(response.Body)
+        cachedUsername = data.username
+        cachedInstanceId = data.instanceId
+        lastFetch = tick()
+        return cachedUsername, cachedInstanceId
     else
-        warn("Failed to fetch latest user: " .. tostring(response))
+        warn("Failed to fetch latest user: " .. tostring(response and response.StatusCode or response))
         return nil, nil
     end
 end
 
--- Fungsi untuk chat jika ada target dalam radius dan server sama
 local function tryChat(targetUsername)
     if isChatting then return end
 
     local targetPlayer = Players:FindFirstChild(targetUsername)
-    if not targetPlayer then
-        -- Target tidak ada di server ini, jangan chat
-        return
-    end
+    if not targetPlayer then return end
 
     local distance = (player.Character and targetPlayer.Character)
         and (player.Character.HumanoidRootPart.Position - targetPlayer.Character.HumanoidRootPart.Position).Magnitude
@@ -43,28 +51,24 @@ local function tryChat(targetUsername)
 
     if distance <= TARGET_RADIUS then
         isChatting = true
-        game:GetService("ReplicatedStorage"):WaitForChild("DefaultChatSystemChatEvents"):WaitForChild("SayMessageRequest"):FireServer(CHAT_MESSAGE, "All")
-        -- Stop chat setelah 5 detik (atau sesuaikan)
+        game:GetService("ReplicatedStorage"):WaitForChild("DefaultChatSystemChatEvents")
+            :WaitForChild("SayMessageRequest"):FireServer(CHAT_MESSAGE, "All")
         task.delay(5, function()
             isChatting = false
         end)
     end
 end
 
--- Main loop cek instance terbaru dan teleport jika perlu
 task.spawn(function()
     while true do
         local targetUsername, targetInstanceId = fetchLatestUser()
         if targetInstanceId and targetInstanceId ~= currentInstanceId and targetUsername ~= player.Name then
             print("Teleporting to latest instance:", targetInstanceId, "target username:", targetUsername)
             TeleportService:TeleportToPlaceInstance(game.PlaceId, targetInstanceId, player)
-            return -- teleport terjadi, keluar loop
+            return
         elseif targetInstanceId == currentInstanceId then
-            -- Kita sudah di instance yang sama, coba chat jika ada player lain dengan username target
             tryChat(targetUsername)
-        else
-            -- instance sama tapi username target sama player kita (tidak usah chat)
         end
-        task.wait(10) -- cek ulang setiap 10 detik
+        task.wait(10)
     end
 end)
