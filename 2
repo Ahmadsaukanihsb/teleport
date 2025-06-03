@@ -135,9 +135,7 @@ end
 -- ====================== [WEBHOOK VIA BACKEND PROXY] ======================
 
 local function sendToBackendProxy(contentOrPayload)
-    local payload = {
-        url = WEBHOOK_URL
-    }
+    local payload = {}
 
     if type(contentOrPayload) == "string" then
         payload.content = contentOrPayload
