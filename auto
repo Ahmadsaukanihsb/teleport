@@ -1,76 +1,86 @@
--- [Auto Joiner - Ambil Instance Terbaru dari Database]
+-- [Auto Joiner - Versi Diperbaiki]
 repeat task.wait() until game:IsLoaded()
 
 -- Konfigurasi
-local ID_GAME_TUJUAN = 126884695634066 -- Ganti dengan ID game target Anda
-local URL_API = "https://backend-vercel-ashy.vercel.app/api/latest-instance.js" -- Endpoint API Anda
-local INTERVAL_PEMERIKSAAN = 30 -- Detik antara pemeriksaan
-local PERCOBAAN_MAX = 3 -- Maksimum percobaan fetch
-local DELAY_GAGAL = 10 -- Delay saat gagal teleport
+local ID_GAME_TUJUAN = 126884695634066
+local URL_API = "https://backend-vercel-ashy.vercel.app/api/latest-instance.js"
+local INTERVAL_PEMERIKSAAN = 30
+local PERCOBAAN_MAX = 3
 
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
 local Pemain = game:GetService("Players")
 
--- Fungsi untuk mengambil instance terbaru dari database
+-- Fungsi debug untuk print response
+local function debugPrint(msg)
+    print("[DEBUG] " .. os.date("%X") .. " - " .. msg)
+end
+
 local function ambilInstanceTerbaru()
     for percobaan = 1, PERCOBAAN_MAX do
+        debugPrint("Percobaan ambil instance #" .. percobaan)
+        
         local berhasil, respon = pcall(function()
-            return HttpService:GetAsync(URL_API.."?gameId="..ID_GAME_TUJUAN)
+            local url = URL_API .. "?gameId=" .. ID_GAME_TUJUAN
+            debugPrint("Mengirim request ke: " .. url)
+            return HttpService:GetAsync(url, true) -- Gunakan nocache
         end)
         
         if berhasil then
+            debugPrint("Response API: " .. tostring(respon))
             local data = HttpService:JSONDecode(respon)
+            
+            -- Verifikasi struktur response
             if data and data.instanceId then
-                print("Berhasil mendapatkan instance:", data.instanceId)
+                debugPrint("Berhasil dapat instance: " .. data.instanceId)
                 return data.instanceId
+            else
+                debugPrint("Format response tidak valid")
             end
         else
-            warn("Percobaan "..percobaan.." gagal: "..tostring(respon))
-            task.wait(2) -- Delay antar percobaan
+            debugPrint("Request gagal: " .. tostring(respon))
         end
+        
+        task.wait(2)
     end
     return nil
 end
 
--- Fungsi untuk join ke instance
 local function joinInstance(instanceId)
+    debugPrint("Memulai teleport...")
     local berhasil, error = pcall(function()
         if instanceId then
-            print("Mencoba teleport ke instance:", instanceId)
+            debugPrint("Teleport ke instance: " .. instanceId)
             TeleportService:TeleportToPlaceInstance(ID_GAME_TUJUAN, instanceId, Pemain.LocalPlayer)
         else
-            print("Mencoba join ke server random")
+            debugPrint("Teleport ke server random")
             TeleportService:Teleport(ID_GAME_TUJUAN, Pemain.LocalPlayer)
         end
     end)
     
     if not berhasil then
-        warn("Gagal teleport: "..tostring(error))
+        debugPrint("ERROR Teleport: " .. tostring(error))
         return false
     end
     return true
 end
 
--- Fungsi utama auto join
 local function mulaiAutoJoin()
     while true do
-        -- Cek jika sudah berada di game tujuan
         if game.PlaceId == ID_GAME_TUJUAN then
-            print("Sudah berada di game tujuan")
+            debugPrint("Sudah di game tujuan")
             task.wait(INTERVAL_PEMERIKSAAN)
             continue
         end
 
-        print("Mencari instance terbaru dari database...")
         local instanceId = ambilInstanceTerbaru()
         
         if instanceId then
             if not joinInstance(instanceId) then
-                task.wait(DELAY_GAGAL) -- Delay jika gagal teleport
+                task.wait(10)
             end
         else
-            print("Tidak ditemukan instance, join ke server random")
+            debugPrint("Gagal dapat instance, coba join random")
             joinInstance(nil)
         end
         
@@ -78,5 +88,10 @@ local function mulaiAutoJoin()
     end
 end
 
--- Mulai proses auto join
+-- Enable HttpService
+pcall(function()
+    HttpService:SetHttpEnabled(true)
+end)
+
+debugPrint("Memulai auto joiner...")
 mulaiAutoJoin()
