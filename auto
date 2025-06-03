@@ -1,95 +1,31 @@
 local HttpService = game:GetService("HttpService")
-local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
-local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
 
-local DEBUG_MODE = true
-local CHECK_INTERVAL = 10
-local API_URL = "https://backend-vercel-ashy.vercel.app/api/instance.js"  -- Ganti dengan endpoint sebenarnya
+local PLACE_ID = 1234567890 -- ganti dengan place ID game kamu
+local API_URL = "https://backend-vercel-ashy.vercel.app/api/latest-instance"
 
-local lastInstanceId = nil
-local stopScript = false
+local currentInstanceId = game.JobId
 
-local function log(msg)
-    if DEBUG_MODE then
-        print("[AutoJoiner] " .. msg)
-    end
+local function fetchLatestInstance()
+	local success, response = pcall(function()
+		return HttpService:GetAsync(API_URL)
+	end)
+
+	if success then
+		local data = HttpService:JSONDecode(response)
+		if data.instanceId and data.instanceId ~= currentInstanceId then
+			print("Instance baru terdeteksi. Teleporting...")
+			TeleportService:TeleportToPlaceInstance(PLACE_ID, data.instanceId, Players.LocalPlayer)
+		else
+			print("Tidak ada instance baru.")
+		end
+	else
+		warn("Gagal mengambil instance terbaru:", response)
+	end
 end
 
-local function getLatestInstance()
-    local success, response = pcall(function()
-        return HttpService:RequestAsync({
-            Url = API_URL,
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json"
-            },
-            Body = "{}"
-        })
-    end)
-
-    if success and response.StatusCode == 200 then
-        local data = HttpService:JSONDecode(response.Body)
-        if data and data.instanceId then
-            return data.instanceId
-        else
-            log("Response JSON missing instanceId")
-        end
-    else
-        log("Failed to get latest instance: " .. (response and response.Body or "unknown error"))
-    end
-    return nil
+-- Cek instance baru setiap 10 detik
+while task.wait(10) do
+	fetchLatestInstance()
 end
-
-local function teleportToInstance(instanceId)
-    local player = Players.LocalPlayer
-    if not player then return false end
-
-    log("Teleporting to instance: " .. instanceId)
-    local success, err = pcall(function()
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, instanceId, player)
-    end)
-
-    if not success then
-        log("Teleport failed: " .. tostring(err))
-    end
-
-    return success
-end
-
-local function mainLoop()
-    while not stopScript do
-        local newInstanceId = getLatestInstance()
-
-        if newInstanceId and newInstanceId ~= lastInstanceId then
-            lastInstanceId = newInstanceId
-            teleportToInstance(newInstanceId)
-        end
-
-        task.wait(CHECK_INTERVAL)
-    end
-end
-
-local function init()
-    log("Starting Auto Joiner...")
-    repeat task.wait() until Players.LocalPlayer
-
-    lastInstanceId = getLatestInstance()
-    if lastInstanceId then
-        log("Initial instance: " .. lastInstanceId)
-    else
-        log("Could not fetch initial instance.")
-    end
-
-    task.spawn(mainLoop)
-end
-
-UserInputService.InputEnded:Connect(function(input)
-    if input.KeyCode == Enum.KeyCode.End then
-        stopScript = true
-        log("Script terminated by user.")
-    end
-end)
-
-init()
-log("Auto Joiner loaded. Press End to stop.")
