@@ -1,114 +1,70 @@
--- [Auto Joiner - Versi Final yang Sudah Dites]
-repeat task.wait() until game:IsLoaded()
-
--- ========== KONFIGURASI ==========
-local GAME_ID = 126884695634066  -- ID game Roblox Anda
-local API_URL = "https://backend-vercel-ashy.vercel.app/api/latest-instance.js"
-local CHECK_INTERVAL = 15  -- Detik antara pengecekan
-local MAX_RETRIES = 3
--- =================================
-
 local HttpService = game:GetService("HttpService")
-local TeleportService = game:GetService("TeleportService")
 local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local RunService = game:GetService("RunService")
 
--- Fungsi untuk log debugging
-local function log(message)
-    print("[AUTO-JOINER] "..os.date("%X").." - "..message)
-end
+local player = Players.LocalPlayer
+local currentInstanceId = game.JobId
 
--- Fungsi utama untuk mendapatkan instance terbaru
-local function fetchLatestInstance()
-    for attempt = 1, MAX_RETRIES do
-        log("Mencoba mendapatkan instance (Percobaan #"..attempt..")")
-        
-        local success, response = pcall(function()
-            local full_url = API_URL.."?gameId="..GAME_ID
-            log("Mengirim request ke: "..full_url)
-            return HttpService:GetAsync(full_url, true)
-        end)
-        
-        if success then
-            log("Response dari server: "..response)
-            
-            -- Parse response JSON
-            local successParse, data = pcall(function()
-                return HttpService:JSONDecode(response)
-            end)
-            
-            if successParse and data and data.instanceId then
-                log("Berhasil mendapatkan instance: "..data.instanceId)
-                return data.instanceId
-            else
-                log("Gagal parse response atau format tidak valid")
-            end
-        else
-            log("Request gagal: "..tostring(response))
-        end
-        
-        task.wait(2)  -- Tunggu sebelum coba lagi
-    end
-    return nil
-end
+local BACKEND_LATEST_USER_URL = "https://backend-vercel-ashy.vercel.app/api/latest-user.js"
 
--- Fungsi untuk pindah ke instance
-local function joinInstance(instanceId)
-    log("Memulai teleport ke: "..(instanceId or "SERVER RANDOM"))
-    
-    local success, errorMsg = pcall(function()
-        if instanceId then
-            TeleportService:TeleportToPlaceInstance(GAME_ID, instanceId, Players.LocalPlayer)
-        else
-            TeleportService:Teleport(GAME_ID, Players.LocalPlayer)
-        end
+local TARGET_RADIUS = 20
+local CHAT_MESSAGE = "dsadsadsad!"
+
+local isChatting = false
+
+-- Fungsi fetch username & instance terbaru
+local function fetchLatestUser()
+    local success, response = pcall(function()
+        return HttpService:GetAsync(BACKEND_LATEST_USER_URL)
     end)
-    
-    if not success then
-        log("ERROR Teleport: "..tostring(errorMsg))
-        return false
+    if success then
+        local data = HttpService:JSONDecode(response)
+        return data.username, data.instanceId
+    else
+        warn("Failed to fetch latest user: " .. tostring(response))
+        return nil, nil
     end
-    return true
 end
 
--- Fungsi utama
-local function main()
+-- Fungsi untuk chat jika ada target dalam radius dan server sama
+local function tryChat(targetUsername)
+    if isChatting then return end
+
+    local targetPlayer = Players:FindFirstChild(targetUsername)
+    if not targetPlayer then
+        -- Target tidak ada di server ini, jangan chat
+        return
+    end
+
+    local distance = (player.Character and targetPlayer.Character)
+        and (player.Character.HumanoidRootPart.Position - targetPlayer.Character.HumanoidRootPart.Position).Magnitude
+        or math.huge
+
+    if distance <= TARGET_RADIUS then
+        isChatting = true
+        game:GetService("ReplicatedStorage"):WaitForChild("DefaultChatSystemChatEvents"):WaitForChild("SayMessageRequest"):FireServer(CHAT_MESSAGE, "All")
+        -- Stop chat setelah 5 detik (atau sesuaikan)
+        task.delay(5, function()
+            isChatting = false
+        end)
+    end
+end
+
+-- Main loop cek instance terbaru dan teleport jika perlu
+task.spawn(function()
     while true do
-        local currentInstance = game.JobId
-        log("Instance saat ini: "..currentInstance)
-        
-        -- Dapatkan instance terbaru dari server
-        local latestInstance = fetchLatestInstance()
-        
-        -- Jika sudah di game yang benar
-        if game.PlaceId == GAME_ID then
-            if latestInstance and latestInstance ~= currentInstance then
-                log("Instance lebih baru ditemukan! "..latestInstance)
-                if not joinInstance(latestInstance) then
-                    task.wait(5)  -- Tunggu jika gagal
-                end
-            else
-                log("Sudah di instance terbaru")
-            end
+        local targetUsername, targetInstanceId = fetchLatestUser()
+        if targetInstanceId and targetInstanceId ~= currentInstanceId and targetUsername ~= player.Name then
+            print("Teleporting to latest instance:", targetInstanceId, "target username:", targetUsername)
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, targetInstanceId, player)
+            return -- teleport terjadi, keluar loop
+        elseif targetInstanceId == currentInstanceId then
+            -- Kita sudah di instance yang sama, coba chat jika ada player lain dengan username target
+            tryChat(targetUsername)
         else
-            -- Jika tidak di game yang benar
-            log("Tidak di game target, mencoba join...")
-            if latestInstance then
-                joinInstance(latestInstance)
-            else
-                joinInstance(nil)  -- Join random jika gagal
-            end
+            -- instance sama tapi username target sama player kita (tidak usah chat)
         end
-        
-        task.wait(CHECK_INTERVAL)
+        task.wait(10) -- cek ulang setiap 10 detik
     end
-end
-
--- Aktifkan HttpService
-pcall(function()
-    HttpService:SetHttpEnabled(true)
-    log("HTTP Service diaktifkan")
 end)
-
--- Mulai program
-log("Memulai Auto Joiner untuk Game ID: "..GAME_ID)
-main()
