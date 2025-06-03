@@ -3,7 +3,7 @@ local TeleportService = game:GetService("TeleportService")
 local Players = game:GetService("Players")
 
 local PLACE_ID = 126884695634066 -- ganti dengan place ID game kamu
-local API_URL = "https://backend-vercel-ashy.vercel.app/api/latest-instance"
+local API_URL = "https://backend-vercel-ashy.vercel.app/api/latest-instance.js"
 
 local currentInstanceId = game.JobId
 
