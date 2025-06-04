@@ -10,6 +10,11 @@ local PLACE_ID = game.PlaceId
 local BACKEND_URL = "http://backend-vercel-ashy.vercel.app/api/latest-user.js"
 local CHECK_INTERVAL = 5 -- detik untuk cek data terbaru
 
+local lastTeleportAttempt = 0
+local teleportCooldown = 10 -- jeda 10 detik antara teleport gagal dan coba lagi
+local lastTriedInstance = nil
+local teleportInProgress = false
+
 -- Fungsi untuk fetch data user terbaru dari backend
 local function fetchLatestUserData()
     local success, response = pcall(function()
@@ -35,16 +40,35 @@ end
 
 -- Fungsi untuk teleport ke instance
 local function teleportToInstance(instanceId)
-    warn("[AutoJoin] Teleporting ke instance:", instanceId)
-    TeleportService:TeleportToPlaceInstance(PLACE_ID, instanceId, LocalPlayer)
+    if teleportInProgress then return end
+    teleportInProgress = true
+    lastTeleportAttempt = tick()
+    lastTriedInstance = instanceId
+
+    warn("[AutoJoin] Mencoba teleport ke instance:", instanceId)
+    local success, err = pcall(function()
+        TeleportService:TeleportToPlaceInstance(PLACE_ID, instanceId, LocalPlayer)
+    end)
+
+    if not success then
+        warn("[AutoJoin] Gagal teleport:", err)
+        teleportInProgress = false
+    end
 end
 
--- Cek apakah target player ada di server
+-- Tangani teleport gagal karena instance penuh
+TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
+    if player == LocalPlayer then
+        warn("[AutoJoin] Teleport gagal:", teleportResult.Name, "-", errorMessage)
+        teleportInProgress = false
+    end
+end)
+
+-- Fungsi tambahan lainnya
 local function getTargetPlayer(username)
     return Players:FindFirstChild(username)
 end
 
--- Hitung jarak antara dua pemain
 local function getDistanceFromPlayer(target)
     local myChar = LocalPlayer.Character
     local targetChar = target and target.Character
@@ -56,15 +80,11 @@ local function getDistanceFromPlayer(target)
     return math.huge
 end
 
--- Fungsi untuk mengirim chat menggunakan TextChatService
 local function sendChat(msg)
     local success, err = pcall(function()
         local channel = TextChatService.TextChannels.RBXGeneral
         if channel then
             channel:SendAsync(msg)
-            print("[sendChat] Mengirim pesan via TextChatService:", msg)
-        else
-            warn("[sendChat] Channel RBXGeneral tidak ditemukan")
         end
     end)
     if not success then
@@ -72,11 +92,9 @@ local function sendChat(msg)
     end
 end
 
--- Variabel kontrol chat loop
 local chatRunning = false
 local chatStop = false
 
--- Chat loop, kirim pesan global tanpa sebut username target
 local function startChatLoop(targetUsername)
     if chatRunning then return end
     chatRunning = true
@@ -88,21 +106,18 @@ local function startChatLoop(targetUsername)
             local targetPlayer = getTargetPlayer(targetUsername)
 
             if not targetPlayer then
-                warn("[AutoChat] Target player tidak ditemukan di server. Menghentikan chat.")
+                warn("[AutoChat] Target player tidak ditemukan.")
                 break
             end
 
-            local distance = getDistanceFromPlayer(targetPlayer)
-            if distance <= 20 then
-                warn("[AutoChat] Ada player dalam radius 20 stud. Menghentikan chat.")
+            if getDistanceFromPlayer(targetPlayer) <= 20 then
+                warn("[AutoChat] Ada player dekat, menghentikan chat.")
                 break
             end
 
             if tick() - lastMessageTime >= 10 then
-                local msg = "dshajkdhasjkhjkas"  -- Pesan global, bisa diubah sesuai kebutuhan
-                sendChat(msg)
+                sendChat("dshajkdhasjkhjkas")
                 lastMessageTime = tick()
-                warn("[AutoChat] Mengirim pesan global:", msg)
             end
 
             task.wait(5)
@@ -111,12 +126,11 @@ local function startChatLoop(targetUsername)
     end)
 end
 
--- Fungsi untuk menghentikan chat loop
 local function stopChatLoop()
     chatStop = true
 end
 
--- Loop utama: cek instance terbaru, teleport jika beda, atau chat jika sama
+-- Loop utama: cek instance terbaru dan teleport
 local currentInstanceId = game.JobId
 local currentUsername = nil
 
@@ -125,19 +139,22 @@ while true do
 
     if targetUsername and targetInstanceId then
         if targetInstanceId ~= currentInstanceId then
-            warn("[AutoJoin] Instance baru ditemukan, teleport ke:", targetInstanceId)
-            stopChatLoop()
-            teleportToInstance(targetInstanceId)
-            break -- keluar loop karena teleport akan reload client
+            if targetInstanceId ~= lastTriedInstance or (tick() - lastTeleportAttempt >= teleportCooldown) then
+                warn("[AutoJoin] Instance baru ditemukan, mencoba teleport...")
+                stopChatLoop()
+                teleportToInstance(targetInstanceId)
+            else
+                warn("[AutoJoin] Masih menunggu cooldown teleport...")
+            end
         else
             if not chatRunning then
-                warn("[AutoJoin] Sudah berada di instance target:", targetInstanceId)
+                warn("[AutoJoin] Sudah berada di instance target.")
                 currentUsername = targetUsername
                 startChatLoop(currentUsername)
             end
         end
     else
-        warn("[AutoJoin] Gagal ambil data terbaru atau data tidak valid")
+        warn("[AutoJoin] Gagal mengambil data terbaru.")
     end
 
     task.wait(CHECK_INTERVAL)
