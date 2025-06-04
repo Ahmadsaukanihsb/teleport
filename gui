@@ -161,6 +161,8 @@ instrTitle.TextColor3 = Color3.new(1, 1, 1)
 instrTitle.TextSize = 18
 instrTitle.Font = Enum.Font.GothamBold
 instrTitle.TextXAlignment = Enum.TextXAlignment.Left
+instrTitle.TextYAlignment = Enum.TextYAlignment.Top
+instrTitle.TextWrapped = true
 instrTitle.Parent = contentFrame
 
 -- Instruction Steps
