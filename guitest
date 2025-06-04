@@ -16,13 +16,15 @@ gui.Parent = game:GetService("CoreGui")
 -- Detect if the device is mobile
 local isMobile = UserInputService.TouchEnabled and not UserInputService.MouseEnabled and not UserInputService.KeyboardEnabled
 
--- Calculate appropriate sizes based on device type
-local mainFrameWidth = isMobile and 0.85 or 450
-local mainFrameHeight = isMobile and 0.65 or 420
-local titleTextSize = isMobile and 18 or 20
-local warningTextSize = isMobile and 14 or 16
-local instructionTextSize = isMobile and 14 or 16
-local buttonTextSize = isMobile and 16 or 18
+-- Mobile-optimized sizing
+local mainFrameWidth = isMobile and 0.9 or 420  -- 90% of screen width on mobile
+local mainFrameHeight = isMobile and 0.6 or 380 -- 60% of screen height on mobile
+local padding = isMobile and 10 or 15
+local titleBarHeight = isMobile and 35 or 45
+local buttonHeight = isMobile and 35 or 45
+local textSizeSmall = isMobile and 14 or 16
+local textSizeMedium = isMobile and 16 or 18
+local textSizeLarge = isMobile and 18 or 20
 
 -- Main Frame Setup
 local mainFrame = Instance.new("Frame")
@@ -42,37 +44,37 @@ TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.Ea
     BackgroundTransparency = 0
 }):Play()
 
--- Rounded corners for smooth style
+-- Rounded corners
 local uicorner = Instance.new("UICorner", mainFrame)
 uicorner.CornerRadius = UDim.new(0, 12)
 
 -- Title Bar
 local titleBar = Instance.new("Frame")
-titleBar.Size = UDim2.new(1, 0, 0, isMobile and 40 or 45)
+titleBar.Size = UDim2.new(1, 0, 0, titleBarHeight)
 titleBar.BackgroundColor3 = Color3.fromRGB(48, 48, 52)
 titleBar.Name = "TitleBar"
 titleBar.Parent = mainFrame
 
 local titleText = Instance.new("TextLabel")
-titleText.Size = UDim2.new(1, -100, 1, 0)
-titleText.Position = UDim2.new(0, 15, 0, 0)
+titleText.Size = UDim2.new(1, -80, 1, 0)
+titleText.Position = UDim2.new(0, padding, 0, 0)
 titleText.BackgroundTransparency = 1
 titleText.Text = "🌙 LUNA DUPE (v3.2.4)"
 titleText.TextColor3 = Color3.fromRGB(230, 230, 230)
-titleText.TextSize = titleTextSize
+titleText.TextSize = textSizeLarge
 titleText.Font = Enum.Font.GothamBold
 titleText.TextXAlignment = Enum.TextXAlignment.Left
 titleText.TextWrapped = true
 titleText.Parent = titleBar
 
--- Close Button
+-- Close Button (smaller on mobile)
 local closeButton = Instance.new("TextButton")
-closeButton.Size = UDim2.new(0, isMobile and 35 or 40, 0, isMobile and 35 or 40)
-closeButton.Position = UDim2.new(1, isMobile and -40 or -45, 0, isMobile and 2 or 3)
+closeButton.Size = UDim2.new(0, titleBarHeight-5, 0, titleBarHeight-5)
+closeButton.Position = UDim2.new(1, -titleBarHeight, 0, 2)
 closeButton.BackgroundColor3 = Color3.fromRGB(220, 70, 70)
 closeButton.Text = "✕"
 closeButton.TextColor3 = Color3.new(1, 1, 1)
-closeButton.TextSize = isMobile and 20 or 22
+closeButton.TextSize = textSizeMedium
 closeButton.Font = Enum.Font.GothamBold
 closeButton.AutoButtonColor = false
 closeButton.Parent = titleBar
@@ -83,29 +85,14 @@ closeButton.ZIndex = 20
 local closeUICorner = Instance.new("UICorner", closeButton)
 closeUICorner.CornerRadius = UDim.new(0, 6)
 
--- Close Button Hover Animation (only on desktop)
-if not isMobile then
-    closeButton.MouseEnter:Connect(function()
-        TweenService:Create(closeButton, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(255, 100, 100)}):Play()
-    end)
-    closeButton.MouseLeave:Connect(function()
-        TweenService:Create(closeButton, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(220, 70, 70)}):Play()
-    end)
-end
-closeButton.MouseButton1Click:Connect(function()
-    TweenService:Create(mainFrame, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
-    task.wait(0.3)
-    gui:Destroy()
-end)
-
--- Minimize Button
+-- Minimize Button (smaller on mobile)
 local minimizeButton = Instance.new("TextButton")
-minimizeButton.Size = UDim2.new(0, isMobile and 35 or 40, 0, isMobile and 35 or 40)
-minimizeButton.Position = UDim2.new(1, isMobile and -80 or -90, 0, isMobile and 2 or 3)
+minimizeButton.Size = UDim2.new(0, titleBarHeight-5, 0, titleBarHeight-5)
+minimizeButton.Position = UDim2.new(1, -titleBarHeight*2+2, 0, 2)
 minimizeButton.BackgroundColor3 = Color3.fromRGB(255, 190, 80)
 minimizeButton.Text = "—"
 minimizeButton.TextColor3 = Color3.new(1, 1, 1)
-minimizeButton.TextSize = isMobile and 24 or 26
+minimizeButton.TextSize = textSizeMedium + 4
 minimizeButton.Font = Enum.Font.GothamBold
 minimizeButton.AutoButtonColor = false
 minimizeButton.Parent = titleBar
@@ -115,16 +102,6 @@ minimizeButton.ZIndex = 20
 
 local minimizeUICorner = Instance.new("UICorner", minimizeButton)
 minimizeUICorner.CornerRadius = UDim.new(0, 6)
-
--- Minimize Button Hover Animation (only on desktop)
-if not isMobile then
-    minimizeButton.MouseEnter:Connect(function()
-        TweenService:Create(minimizeButton, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(255, 215, 120)}):Play()
-    end)
-    minimizeButton.MouseLeave:Connect(function()
-        TweenService:Create(minimizeButton, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(255, 190, 80)}):Play()
-    end)
-end
 
 -- Content Frame
 local contentFrame = Instance.new("Frame")
@@ -137,25 +114,25 @@ contentFrame.ClipsDescendants = true
 
 -- Error Text
 local errorText = Instance.new("TextLabel")
-errorText.Size = UDim2.new(1, -30, 0, isMobile and 25 or 30)
-errorText.Position = UDim2.new(0, 15, 0, 10)
+errorText.Size = UDim2.new(1, -padding*2, 0, 25)
+errorText.Position = UDim2.new(0, padding, 0, 5)
 errorText.BackgroundTransparency = 1
 errorText.Text = ""
 errorText.TextColor3 = Color3.fromRGB(255, 80, 80)
-errorText.TextSize = isMobile and 16 or 18
+errorText.TextSize = textSizeMedium
 errorText.Font = Enum.Font.GothamBold
 errorText.TextXAlignment = Enum.TextXAlignment.Left
 errorText.TextWrapped = true
 errorText.Parent = contentFrame
 
--- Warning Box
+-- Warning Box (more compact on mobile)
 local warningBox = Instance.new("TextLabel")
-warningBox.Size = UDim2.new(1, -30, 0, isMobile and 80 or 70)
-warningBox.Position = UDim2.new(0, 15, 0, isMobile and 45 or 50)
+warningBox.Size = UDim2.new(1, -padding*2, 0, isMobile and 60 or 70)
+warningBox.Position = UDim2.new(0, padding, 0, 35)
 warningBox.BackgroundColor3 = Color3.fromRGB(200, 55, 55)
 warningBox.Text = "⚠️ REQUIRES: Polar Bear, Red Fox, Chicken Zombie, Dragonfly, Raccoon, Queen Bee"
 warningBox.TextColor3 = Color3.new(1, 1, 1)
-warningBox.TextSize = warningTextSize
+warningBox.TextSize = textSizeSmall
 warningBox.Font = Enum.Font.GothamBold
 warningBox.TextXAlignment = Enum.TextXAlignment.Left
 warningBox.TextWrapped = true
@@ -168,31 +145,31 @@ warningUICorner.CornerRadius = UDim.new(0, 6)
 
 -- Instruction Title
 local instrTitle = Instance.new("TextLabel")
-instrTitle.Size = UDim2.new(1, -30, 0, isMobile and 25 or 28)
-instrTitle.Position = UDim2.new(0, 15, 0, isMobile and 140 or 130)
+instrTitle.Size = UDim2.new(1, -padding*2, 0, 25)
+instrTitle.Position = UDim2.new(0, padding, 0, isMobile and 100 or 110)
 instrTitle.BackgroundTransparency = 1
 instrTitle.Text = "📝 INSTRUCTIONS:"
 instrTitle.TextColor3 = Color3.new(1, 1, 1)
-instrTitle.TextSize = isMobile and 16 or 18
+instrTitle.TextSize = textSizeMedium
 instrTitle.Font = Enum.Font.GothamBold
 instrTitle.TextXAlignment = Enum.TextXAlignment.Left
 instrTitle.Parent = contentFrame
 
--- Instruction Steps
+-- Instruction Steps (more compact spacing)
 local steps = {
-    "1. Hold a Red Fox, Dragonfly, Raccoon, Polar Bear, Chicken Zombie, Queen Bee",
+    "1. Hold required pets",
     "2. Press DUPE button",
     "3. Wait 5-10 Minutes"
 }
 
 for i, step in ipairs(steps) do
     local line = Instance.new("TextLabel")
-    line.Size = UDim2.new(1, -30, 0, isMobile and 20 or 22)
-    line.Position = UDim2.new(0, 15, 0, (isMobile and 170 or 165) + (i - 1) * (isMobile and 22 or 25))
+    line.Size = UDim2.new(1, -padding*2, 0, 20)
+    line.Position = UDim2.new(0, padding, 0, (isMobile and 130 or 140) + (i - 1) * 22)
     line.BackgroundTransparency = 1
     line.Text = step
     line.TextColor3 = Color3.new(1, 1, 1)
-    line.TextSize = instructionTextSize
+    line.TextSize = textSizeSmall
     line.Font = Enum.Font.Gotham
     line.TextXAlignment = Enum.TextXAlignment.Left
     line.TextWrapped = true
@@ -201,24 +178,24 @@ end
 
 -- Success Rate Label
 local success = Instance.new("TextLabel")
-success.Size = UDim2.new(1, -30, 0, isMobile and 22 or 25)
-success.Position = UDim2.new(0, 15, 0, isMobile and 250 or 250)
+success.Size = UDim2.new(1, -padding*2, 0, 20)
+success.Position = UDim2.new(0, padding, 0, isMobile and 200 or 210)
 success.BackgroundTransparency = 1
 success.Text = "✔ 92% Success Rate"
 success.TextColor3 = Color3.fromRGB(85, 230, 150)
-success.TextSize = instructionTextSize
+success.TextSize = textSizeSmall
 success.Font = Enum.Font.Gotham
 success.TextXAlignment = Enum.TextXAlignment.Left
 success.Parent = contentFrame
 
--- Dupe Button
+-- Dupe Button (full width on mobile)
 local dupeButton = Instance.new("TextButton")
-dupeButton.Size = UDim2.new(0.75, 0, 0, isMobile and 40 or 45)
-dupeButton.Position = UDim2.new(0.125, 0, 0, isMobile and 310 or 300)
+dupeButton.Size = isMobile and UDim2.new(1, -padding*2, 0, buttonHeight) or UDim2.new(0.75, 0, 0, buttonHeight)
+dupeButton.Position = isMobile and UDim2.new(0, padding, 0, 230) or UDim2.new(0.125, 0, 0, 240)
 dupeButton.BackgroundColor3 = Color3.fromRGB(50, 180, 90)
 dupeButton.Text = "DUPE"
 dupeButton.TextColor3 = Color3.new(1, 1, 1)
-dupeButton.TextSize = buttonTextSize
+dupeButton.TextSize = textSizeMedium
 dupeButton.Font = Enum.Font.GothamBold
 dupeButton.AutoButtonColor = false
 dupeButton.Parent = contentFrame
@@ -227,16 +204,6 @@ dupeButton.Name = "DupeButton"
 
 local dupeUICorner = Instance.new("UICorner", dupeButton)
 dupeUICorner.CornerRadius = UDim.new(0, 8)
-
--- Button hover animation (only on desktop)
-if not isMobile then
-    dupeButton.MouseEnter:Connect(function()
-        TweenService:Create(dupeButton, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(70, 220, 110)}):Play()
-    end)
-    dupeButton.MouseLeave:Connect(function()
-        TweenService:Create(dupeButton, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(50, 180, 90)}):Play()
-    end)
-end
 
 -- Button click animation helper
 local function buttonClickAnim(button)
@@ -339,47 +306,6 @@ minimizeButton.MouseButton1Click:Connect(function()
     end
 end)
 
--- Dragging functionality for mainFrame
-local dragging
-local dragInput
-local dragStart
-local startPos
-
-local function updateInput(input)
-    local delta = input.Position - dragStart
-    mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
-        startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-end
-
--- Only enable dragging on desktop (mobile will use touch controls)
-if not isMobile then
-    titleBar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            dragStart = input.Position
-            startPos = mainFrame.Position
-
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
-            end)
-        end
-    end)
-
-    titleBar.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement then
-            dragInput = input
-        end
-    end)
-
-    UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            updateInput(input)
-        end
-    end)
-end
-
 -- On mobile, make sure the GUI stays within screen bounds
 if isMobile then
     local function ensureGuiInBounds()
@@ -395,9 +321,6 @@ if isMobile then
         end
     end
 
-    -- Run once when GUI is created
     ensureGuiInBounds()
-    
-    -- Run whenever screen size changes
     workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(ensureGuiInBounds)
 end
