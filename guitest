@@ -129,7 +129,7 @@ local warningBox = Instance.new("TextLabel")
 warningBox.Size = UDim2.new(1, -20 * scaleFactor, 0, 35 * scaleFactor)
 warningBox.Position = UDim2.new(0, 10 * scaleFactor, 0, 35 * scaleFactor)
 warningBox.BackgroundColor3 = Color3.fromRGB(200, 55, 55)
-warningBox.Text = "⚠️ REQUIRES: Polar Bear, Red Fox, Chicken Zombie, Dragonfly, Raccoon, Queen Bee"
+warningBox.Text = "⚠️ REQUIRED PET: Polar Bear, Red Fox, Chicken Zombie, Dragonfly, Raccoon, Queen Bee"
 warningBox.TextColor3 = Color3.new(1, 1, 1)
 warningBox.TextSize = 14 * scaleFactor
 warningBox.Font = Enum.Font.GothamBold
@@ -157,7 +157,7 @@ instrTitle.Parent = contentFrame
 
 -- Instruction Steps (smaller for mobile)
 local steps = {
-    "1. Hold a Polar Bear, Red Fox, Chicken Zombie, Dragonfly, Raccoon, or Queen Bee",
+    "1. Hold a Required Pet",
     "2. Press DUPE button",
     "3. Wait 5-10 Minutes"
 }
