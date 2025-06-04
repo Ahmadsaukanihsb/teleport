@@ -128,12 +128,11 @@ errorText.TextColor3 = Color3.fromRGB(255, 80, 80)
 errorText.TextSize = 18
 errorText.Font = Enum.Font.GothamBold
 errorText.TextXAlignment = Enum.TextXAlignment.Left
-
 errorText.Parent = contentFrame
 
 -- Warning Box
 local warningBox = Instance.new("TextLabel")
-warningBox.Size = UDim2.new(1, -30, 0, 60)
+warningBox.Size = UDim2.new(1, -30, 0, 80) -- dinaikkan dari 60 jadi 80
 warningBox.Position = UDim2.new(0, 15, 0, 50)
 warningBox.BackgroundColor3 = Color3.fromRGB(200, 55, 55)
 warningBox.Text = "⚠️ REQUIRED CHICKEN ZOMBIE, POLAR BEAR RED FOX, DRAGONFLY, RACCOON, QUEEN BEE!"
@@ -142,18 +141,18 @@ warningBox.TextColor3 = Color3.new(1, 1, 1)
 warningBox.TextSize = 16
 warningBox.Font = Enum.Font.GothamBold
 warningBox.TextXAlignment = Enum.TextXAlignment.Left
-warningBox.TextYAlignment = Enum.TextYAlignment.Top
-warningBox.TextWrapped = true
+warningBox.TextWrapped = true -- sudah aktif
 warningBox.BorderSizePixel = 0
 warningBox.ClipsDescendants = true
 warningBox.Parent = contentFrame
+
 
 local warningUICorner = Instance.new("UICorner", warningBox)
 warningUICorner.CornerRadius = UDim.new(0, 6)
 
 -- Instruction Title
 local instrTitle = Instance.new("TextLabel")
-instrTitle.Size = UDim2.new(1, -30, 0, 28)
+instrTitle.Size = UDim2.new(1, -30, 0, 60)
 instrTitle.Position = UDim2.new(0, 15, 0, 100)
 instrTitle.BackgroundTransparency = 1
 instrTitle.Text = "📝 INSTRUCTIONS:"
@@ -161,8 +160,6 @@ instrTitle.TextColor3 = Color3.new(1, 1, 1)
 instrTitle.TextSize = 18
 instrTitle.Font = Enum.Font.GothamBold
 instrTitle.TextXAlignment = Enum.TextXAlignment.Left
-instrTitle.TextYAlignment = Enum.TextYAlignment.Top
-instrTitle.TextWrapped = true
 instrTitle.Parent = contentFrame
 
 -- Instruction Steps
