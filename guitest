@@ -132,7 +132,7 @@ errorText.Parent = contentFrame
 
 -- Warning Box
 local warningBox = Instance.new("TextLabel")
-warningBox.Size = UDim2.new(1, -30, 0, 60)
+warningBox.Size = UDim2.new(1, -30, 0, 40)
 warningBox.Position = UDim2.new(0, 15, 0, 50)
 warningBox.BackgroundColor3 = Color3.fromRGB(200, 55, 55)
 warningBox.Text = "⚠️ REQUIRES POLAR BEAR, RED FOX,CHICKEN ZOMBIE, DRAGONFLY, RACCOON, QUEEN BEE,!"
