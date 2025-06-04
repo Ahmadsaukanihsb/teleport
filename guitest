@@ -134,6 +134,7 @@ warningBox.TextColor3 = Color3.new(1, 1, 1)
 warningBox.TextSize = 14 * scaleFactor
 warningBox.Font = Enum.Font.GothamBold
 warningBox.TextXAlignment = Enum.TextXAlignment.Left
+warningBox.TextWrapped = true
 warningBox.BorderSizePixel = 0
 warningBox.ClipsDescendants = true
 warningBox.Parent = contentFrame
