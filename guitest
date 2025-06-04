@@ -14,7 +14,7 @@ gui.Parent = game:GetService("CoreGui")
 
 -- Main Frame Setup
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 420, 0, 380)
+mainFrame.Size = UDim2.new(0, 450, 0, 420) -- Slightly larger to accommodate text
 mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
 mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 mainFrame.BackgroundColor3 = Color3.fromRGB(28, 28, 30)
@@ -128,18 +128,20 @@ errorText.TextColor3 = Color3.fromRGB(255, 80, 80)
 errorText.TextSize = 18
 errorText.Font = Enum.Font.GothamBold
 errorText.TextXAlignment = Enum.TextXAlignment.Left
+errorText.TextWrapped = true
 errorText.Parent = contentFrame
 
 -- Warning Box
 local warningBox = Instance.new("TextLabel")
-warningBox.Size = UDim2.new(1, -30, 0, 60)
+warningBox.Size = UDim2.new(1, -30, 0, 70) -- Increased height for wrapped text
 warningBox.Position = UDim2.new(0, 15, 0, 50)
 warningBox.BackgroundColor3 = Color3.fromRGB(200, 55, 55)
-warningBox.Text = "⚠️ REQUIRES POLAR BEAR, RED FOX,CHICKEN ZOMBIE, DRAGONFLY, RACCOON, QUEEN BEE,!"
+warningBox.Text = "⚠️ REQUIRES: Polar Bear, Red Fox, Chicken Zombie, Dragonfly, Raccoon, Queen Bee"
 warningBox.TextColor3 = Color3.new(1, 1, 1)
 warningBox.TextSize = 16
 warningBox.Font = Enum.Font.GothamBold
 warningBox.TextXAlignment = Enum.TextXAlignment.Left
+warningBox.TextWrapped = true
 warningBox.BorderSizePixel = 0
 warningBox.ClipsDescendants = true
 warningBox.Parent = contentFrame
@@ -150,7 +152,7 @@ warningUICorner.CornerRadius = UDim.new(0, 6)
 -- Instruction Title
 local instrTitle = Instance.new("TextLabel")
 instrTitle.Size = UDim2.new(1, -30, 0, 28)
-instrTitle.Position = UDim2.new(0, 15, 0, 100)
+instrTitle.Position = UDim2.new(0, 15, 0, 130) -- Adjusted position
 instrTitle.BackgroundTransparency = 1
 instrTitle.Text = "📝 INSTRUCTIONS:"
 instrTitle.TextColor3 = Color3.new(1, 1, 1)
@@ -169,20 +171,21 @@ local steps = {
 for i, step in ipairs(steps) do
     local line = Instance.new("TextLabel")
     line.Size = UDim2.new(1, -30, 0, 22)
-    line.Position = UDim2.new(0, 15, 0, 135 + (i - 1) * 25)
+    line.Position = UDim2.new(0, 15, 0, 165 + (i - 1) * 25) -- Adjusted position
     line.BackgroundTransparency = 1
     line.Text = step
     line.TextColor3 = Color3.new(1, 1, 1)
     line.TextSize = 16
     line.Font = Enum.Font.Gotham
     line.TextXAlignment = Enum.TextXAlignment.Left
+    line.TextWrapped = true
     line.Parent = contentFrame
 end
 
 -- Success Rate Label
 local success = Instance.new("TextLabel")
 success.Size = UDim2.new(1, -30, 0, 25)
-success.Position = UDim2.new(0, 15, 0, 240)
+success.Position = UDim2.new(0, 15, 0, 250) -- Adjusted position
 success.BackgroundTransparency = 1
 success.Text = "✔ 92% Success Rate"
 success.TextColor3 = Color3.fromRGB(85, 230, 150)
@@ -194,7 +197,7 @@ success.Parent = contentFrame
 -- Dupe Button
 local dupeButton = Instance.new("TextButton")
 dupeButton.Size = UDim2.new(0.75, 0, 0, 45)
-dupeButton.Position = UDim2.new(0.125, 0, 0, 280)
+dupeButton.Position = UDim2.new(0.125, 0, 0, 300) -- Adjusted position
 dupeButton.BackgroundColor3 = Color3.fromRGB(50, 180, 90)
 dupeButton.Text = "DUPE"
 dupeButton.TextColor3 = Color3.new(1, 1, 1)
@@ -302,12 +305,12 @@ local isMinimized = false
 minimizeButton.MouseButton1Click:Connect(function()
     if isMinimized then
         -- Restore
-        TweenService:Create(mainFrame, TweenInfo.new(0.4), {Size = UDim2.new(0, 420, 0, 380)}):Play()
+        TweenService:Create(mainFrame, TweenInfo.new(0.4), {Size = UDim2.new(0, 450, 0, 420)}):Play()
         TweenService:Create(contentFrame, TweenInfo.new(0.4), {BackgroundTransparency = 1}):Play()
         isMinimized = false
     else
         -- Minimize
-        TweenService:Create(mainFrame, TweenInfo.new(0.4), {Size = UDim2.new(0, 420, 0, 45)}):Play()
+        TweenService:Create(mainFrame, TweenInfo.new(0.4), {Size = UDim2.new(0, 450, 0, 45)}):Play()
         TweenService:Create(contentFrame, TweenInfo.new(0.4), {BackgroundTransparency = 0}):Play()
         isMinimized = true
     end
