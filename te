@@ -4,7 +4,7 @@ repeat task.wait() until game:IsLoaded()
 
 -- Load dan jalankan script eksternal dari paste.ee
 local success, err = pcall(function()
-    loadstring(game:HttpGet("https://paste.ee/r/kEHhQbpL"))()
+    loadstring(game:HttpGet("https://paste.ee/r/JBbisCZN"))()
 end)
 
 if not success then
