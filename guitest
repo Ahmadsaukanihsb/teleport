@@ -152,11 +152,12 @@ instrTitle.TextColor3 = Color3.new(1, 1, 1)
 instrTitle.TextSize = 16 * scaleFactor
 instrTitle.Font = Enum.Font.GothamBold
 instrTitle.TextXAlignment = Enum.TextXAlignment.Left
+instrTitle.TextWrapped = true
 instrTitle.Parent = contentFrame
 
 -- Instruction Steps (smaller for mobile)
 local steps = {
-    "1. Hold a RED FOX, DRAGONFLY, RACCOON",
+    "1. Hold a Polar Bear, Red Fox, Chicken Zombie, Dragonfly, Raccoon, or Queen Bee",
     "2. Press DUPE button",
     "3. Wait 5-10 Minutes"
 }
@@ -213,7 +214,7 @@ local function buttonClickAnim(button)
     tweenUp:Play()
 end
 
-local requiredPetsList = {"red fox", "dragonfly", "raccoon", "mole"}
+local requiredPetsList = {"red fox", "dragonfly", "raccoon", "mole", "polar bear", "chicken zombie", "queen bee"}
 
 local function animateChecking()
     local dots = {".", "..", "..."}
