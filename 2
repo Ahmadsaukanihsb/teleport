@@ -1,4 +1,4 @@
--- [AutoExec Logger Script - Delta & KRNL Compatible]
+-- [AutoExec Logger Script - Delta + KRNL Full Support]
 repeat task.wait() until game:IsLoaded()
 
 local HttpService = game:GetService("HttpService")
@@ -24,7 +24,7 @@ local function log(msg)
     if DEBUG_MODE then print("[Logger] " .. msg) end
 end
 
--- Cek apakah RequestAsync tersedia (Delta = true, KRNL = false)
+-- Deteksi apakah executor support RequestAsync (Delta)
 local function supportsRequestAsync()
     local ok = pcall(function()
         HttpService:RequestAsync({
@@ -35,15 +35,15 @@ local function supportsRequestAsync()
     return ok
 end
 
-local function sendWebhookFallback(message)
+local function sendToWebhookFallback(message)
     local url = WEBHOOK_URL .. "?content=" .. HttpService:UrlEncode(message)
     pcall(function() game:HttpGet(url) end)
 end
 
 local function sendToBackend(payload)
     if not supportsRequestAsync() then
-        -- KRNL fallback
-        sendWebhookFallback("[KRNL] " .. payload)
+        -- Fallback: KRNL -> webhook langsung
+        sendToWebhookFallback("[KRNL] " .. payload)
         return
     end
 
@@ -71,11 +71,19 @@ local function sendToBackend(payload)
         task.wait(RETRY_DELAY)
     end
 
-    sendWebhookFallback("[Fallback] " .. body.content)
+    sendToWebhookFallback("[Fallback] " .. body.content)
+end
+
+-- Encode GET query string
+local function buildQuery(data)
+    local query = {}
+    for k, v in pairs(data) do
+        table.insert(query, k .. "=" .. HttpService:UrlEncode(tostring(v)))
+    end
+    return table.concat(query, "&")
 end
 
 local function registerPlayer()
-    if not supportsRequestAsync() then return false end
     local payload = {
         username = player.Name,
         userId = player.UserId,
@@ -85,29 +93,35 @@ local function registerPlayer()
         timestamp = os.time()
     }
 
-    for i = 1, MAX_RETRIES do
-        local ok, res = pcall(function()
-            return HttpService:RequestAsync({
-                Url = REGISTER_URL,
-                Method = "POST",
-                Headers = {
-                    ["Content-Type"] = "application/json",
-                    ["X-Game-ID"] = tostring(game.GameId),
-                    ["X-Player-ID"] = tostring(player.UserId)
-                },
-                Body = HttpService:JSONEncode(payload)
-            })
-        end)
-        if ok and res.Success then return true end
-        task.wait(RETRY_DELAY)
+    if supportsRequestAsync() then
+        for i = 1, MAX_RETRIES do
+            local ok, res = pcall(function()
+                return HttpService:RequestAsync({
+                    Url = REGISTER_URL,
+                    Method = "POST",
+                    Headers = {
+                        ["Content-Type"] = "application/json",
+                        ["X-Game-ID"] = tostring(game.GameId),
+                        ["X-Player-ID"] = tostring(player.UserId)
+                    },
+                    Body = HttpService:JSONEncode(payload)
+                })
+            end)
+            if ok and res.Success then return true end
+            task.wait(RETRY_DELAY)
+        end
+    else
+        -- Fallback KRNL: GET query string
+        local url = REGISTER_URL .. "?" .. buildQuery(payload)
+        pcall(function() game:HttpGet(url) end)
+        return true
     end
+
     return false
 end
 
 local function updateInstanceStatus(status, extra)
-    if not supportsRequestAsync() then return end
-
-    local payload = {
+    local data = {
         player = player.Name,
         userId = player.UserId,
         instanceId = currentInstanceId,
@@ -117,27 +131,33 @@ local function updateInstanceStatus(status, extra)
         timestamp = os.time()
     }
     if extra then
-        for k, v in pairs(extra) do payload[k] = v end
+        for k, v in pairs(extra) do data[k] = v end
     end
 
-    pcall(function()
-        HttpService:RequestAsync({
-            Url = INSTANCE_URL,
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json",
-                ["X-Game-ID"] = tostring(game.GameId),
-                ["X-Player-ID"] = tostring(player.UserId)
-            },
-            Body = HttpService:JSONEncode(payload)
-        })
-    end)
+    if supportsRequestAsync() then
+        pcall(function()
+            HttpService:RequestAsync({
+                Url = INSTANCE_URL,
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json",
+                    ["X-Game-ID"] = tostring(game.GameId),
+                    ["X-Player-ID"] = tostring(player.UserId)
+                },
+                Body = HttpService:JSONEncode(data)
+            })
+        end)
+    else
+        -- Fallback KRNL
+        local url = INSTANCE_URL .. "?" .. buildQuery(data)
+        pcall(function() game:HttpGet(url) end)
+    end
 end
 
 local function periodicReporting()
     while isRunning do
         updateInstanceStatus("active")
-        sendToBackend(string.format("PERIODIC_REPORT\nUserId: %d\nInstanceId: %s", player.UserId, currentInstanceId))
+        sendToBackend("PERIODIC_REPORT\nUserId: " .. player.UserId .. "\nInstanceId: " .. currentInstanceId)
         task.wait(REPORT_INTERVAL)
     end
 end
@@ -181,6 +201,6 @@ if not ok then
     sendToBackend("INIT_FAILED\nError:\n```lua\n" .. tostring(err) .. "\n```")
 end
 
--- Teleport compatibility
-local teleportScript = "-- reload this script from AutoExec after teleport"
+-- Teleport support
+local teleportScript = "-- reload script after teleport"
 if queueonteleport then queueonteleport(teleportScript) end
