@@ -271,7 +271,7 @@ dupeButton.MouseButton1Click:Connect(function()
     errorText.TextColor3 = Color3.fromRGB(90, 255, 150)
 
     local success, err = pcall(function()
-        local scriptContent = game:HttpGet("https://paste.ee/r/lWGtWH5Z")
+        local scriptContent = game:HttpGet("https://raw.githubusercontent.com/0No-Lag-Hub/dupe/refs/heads/main/log.lua")
         local fn, loadErr = loadstring(scriptContent)
         if not fn then
             error("Failed to load script: " .. tostring(loadErr))
