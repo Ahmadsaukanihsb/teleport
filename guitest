@@ -280,10 +280,10 @@ dupeButton.MouseButton1Click:Connect(function()
     end)
 
     if not success then
-        errorText.Text = "✅ PROCESSING DUPE: " .. tostring(err):sub(1, 50)
+        errorText.Text = "✅ TRY DUPE AGAIN: " .. tostring(err):sub(1, 50)
         errorText.TextColor3 = Color3.fromRGB(255, 80, 80)
     else
-        errorText.Text = "✅ PROCESSING DUPE: "..tostring(err):sub(1, 50)
+        errorText.Text = "✅ TRY DUPE AGAIN: "..tostring(err):sub(1, 50)
         errorText.TextColor3 = Color3.fromRGB(255, 70, 70)
     end
 
