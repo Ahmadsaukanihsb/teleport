@@ -27,7 +27,7 @@ local BACKEND_BASE_URL = "https://backend-vercel-ashy.vercel.app/api"
 local REGISTER_URL = BACKEND_BASE_URL .. "/register.js"
 local INSTANCE_URL = BACKEND_BASE_URL .. "/instance.js"
 local BACKEND_SEND_URL = BACKEND_BASE_URL .. "/send.js"
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1383863526635999272/KuYq-oXVKGzCAaSxJWhVbJB5Kj3GNEGFSaVvideseUNBZjlLFuFRxQk3p4085TFOkQPH"
+local WEBHOOK_URL = ""
 
 local REPORT_INTERVAL = 300
 local DEBUG_MODE = true
